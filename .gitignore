@@ -1,0 +1,19 @@
+# Python derleme dosyaları
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Geçici grafik dosyaları
+tmp_charts/
+
+# Ortam dosyaları
+.env
+*.env
+
+# IDE
+.vscode/
+.idea/
+
+# Log dosyaları
+*.log
