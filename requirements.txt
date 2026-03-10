@@ -1,0 +1,7 @@
+requests
+pandas
+numpy
+ta
+mplfinance
+matplotlib
+python-telegram-bot>=20.0
