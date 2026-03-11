@@ -12,6 +12,7 @@ import logging
 import argparse
 import asyncio
 import traceback
+import multiprocessing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -66,6 +67,10 @@ CHART_UP_COLOR    = "#00c896"
 CHART_DOWN_COLOR  = "#ff4560"
 CHART_TEMP_DIR    = "tmp_charts"
 
+# ─── Binance API ───
+BINANCE_API_KEY    = ""          # Binance API anahtarınız
+BINANCE_API_SECRET = ""          # Binance gizli anahtarınız
+
 # ─── API ───
 BINANCE_BASE_URL  = "https://api.binance.com"
 API_RETRY_COUNT   = 3
@@ -79,14 +84,19 @@ RATE_LIMIT_WEIGHT = 1100
 # ═══════════════════════════════════════════════
 
 def loglama_kur(timeframe: str) -> logging.Logger:
-    """Konsol INFO, bot_TF.log DEBUG, errors.log ERROR loglaması kurar."""
+    """Konsol INFO, bot_TF.log DEBUG, errors.log ERROR loglaması kurar.
+    Multiprocessing kullanımı için mevcut handler'ları temizler ve yeniden kurar."""
     logger = logging.getLogger("binance_srl_bot")
     logger.setLevel(logging.DEBUG)
 
-    if logger.handlers:
-        return logger
+    # Her process kendi handler'larını kursun (multiprocessing desteği için temizle)
+    logger.handlers.clear()
 
-    fmt = logging.Formatter(
+    fmt_konsol = logging.Formatter(
+        f"%(asctime)s [{timeframe.upper()}] [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    fmt_dosya = logging.Formatter(
         "%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S"
     )
@@ -94,14 +104,14 @@ def loglama_kur(timeframe: str) -> logging.Logger:
     # Konsol — INFO
     konsol = logging.StreamHandler(sys.stdout)
     konsol.setLevel(logging.INFO)
-    konsol.setFormatter(fmt)
+    konsol.setFormatter(fmt_konsol)
     logger.addHandler(konsol)
 
-    # bot_TF.log — DEBUG
+    # bot_TF.log — DEBUG (her timeframe ayrı dosyaya yazar)
     try:
         tf_dosya = logging.FileHandler(f"bot_{timeframe.upper()}.log", encoding="utf-8")
         tf_dosya.setLevel(logging.DEBUG)
-        tf_dosya.setFormatter(fmt)
+        tf_dosya.setFormatter(fmt_dosya)
         logger.addHandler(tf_dosya)
     except Exception:
         pass
@@ -110,7 +120,7 @@ def loglama_kur(timeframe: str) -> logging.Logger:
     try:
         hata_dosya = logging.FileHandler("errors.log", encoding="utf-8")
         hata_dosya.setLevel(logging.ERROR)
-        hata_dosya.setFormatter(fmt)
+        hata_dosya.setFormatter(fmt_dosya)
         logger.addHandler(hata_dosya)
     except Exception:
         pass
@@ -126,10 +136,15 @@ log = logging.getLogger("binance_srl_bot")
 # ═══════════════════════════════════════════════
 
 def _api_get(url: str, params: dict = None, timeout: int = 15) -> dict | list:
-    """Binance API GET isteği; 3 deneme, 5s aralıkla retry."""
+    """Binance API GET isteği; 3 deneme, 5s aralıkla retry.
+    BINANCE_API_KEY tanımlıysa X-MBX-APIKEY header'ı eklenir (rate limit 1200 → 6000)."""
     for deneme in range(1, API_RETRY_COUNT + 1):
         try:
-            resp = requests.get(url, params=params, timeout=timeout)
+            # API key varsa header'a ekle (rate limit artışı için)
+            headers = {}
+            if BINANCE_API_KEY:
+                headers["X-MBX-APIKEY"] = BINANCE_API_KEY
+            resp = requests.get(url, params=params, headers=headers, timeout=timeout)
             # Rate limit ağırlığını takip et
             kullanilan = int(resp.headers.get("X-MBX-USED-WEIGHT-1M", 0))
             if kullanilan >= RATE_LIMIT_WEIGHT:
@@ -1018,16 +1033,44 @@ async def ana_dongu(token: str, chat_id: str, timeframe: str):
         await asyncio.sleep(SCAN_INTERVAL_SEC)
 
 
+def process_calistir(token: str, chat_id: str, timeframe: str, api_key: str, api_secret: str):
+    """Multiprocessing modunda her timeframe için ayrı process'te çalışan fonksiyon."""
+    global BINANCE_API_KEY, BINANCE_API_SECRET
+    # Argparse'tan gelen değerlerle global sabitleri güncelle
+    if api_key:
+        BINANCE_API_KEY = api_key
+    if api_secret:
+        BINANCE_API_SECRET = api_secret
+
+    # Her process kendi log dosyasına yazar
+    loglama_kur(timeframe)
+    log.info("Process başlatıldı: Timeframe=%s, Chat ID=%s (PID: %d)",
+             timeframe.upper(), chat_id, multiprocessing.current_process().pid)
+    try:
+        asyncio.run(ana_dongu(token=token, chat_id=chat_id, timeframe=timeframe))
+    except KeyboardInterrupt:
+        log.info("Process durduruldu (Ctrl+C): Timeframe=%s", timeframe.upper())
+
+
 def main():
     """Komut satırı argümanlarını işler ve botu başlatır."""
+    global BINANCE_API_KEY, BINANCE_API_SECRET
     parser = argparse.ArgumentParser(
         description="Binance SRL Sinyal Botu v3.0",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Örnek kullanım:
+  # Tek timeframe (eski davranış):
   python bot.py --token BOT_TOKEN --chat-id CHAT_ID
   python bot.py --token BOT_TOKEN --chat-id CHAT_ID --timeframe 4h
-  python bot.py --token BOT_TOKEN --chat-id CHAT_ID --timeframe 1d
+
+  # Tüm timeframe'ler paralel (YENİ — multiprocessing):
+  python bot.py --token BOT_TOKEN --multi \\
+      --tf 1H:-100111 \\
+      --tf 4H:-100222 \\
+      --tf 8H:-100333 \\
+      --tf 12H:-100444 \\
+      --tf 1D:-100555
         """
     )
     parser.add_argument(
@@ -1036,37 +1079,102 @@ def main():
     )
     parser.add_argument(
         "--chat-id", type=str, default=TELEGRAM_CHAT_ID,
-        help="Telegram chat ID"
+        help="Telegram chat ID (tek timeframe modunda kullanılır)"
     )
     parser.add_argument(
         "--timeframe", type=str, default=ACTIVE_TIMEFRAME,
         choices=["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w"],
         help="Mum timeframe (varsayılan: 1h)"
     )
+    parser.add_argument(
+        "--multi", action="store_true",
+        help="Çoklu timeframe modu — tüm --tf çiftleri paralel process olarak başlatılır"
+    )
+    parser.add_argument(
+        "--tf", action="append", metavar="TIMEFRAME:CHAT_ID",
+        help="Timeframe:ChatID çifti. Örnek: --tf 1H:-100111 --tf 4H:-100222"
+    )
+    parser.add_argument(
+        "--api-key", type=str, default=BINANCE_API_KEY,
+        help="Binance API anahtarı (bot.py içindeki BINANCE_API_KEY değerini override eder)"
+    )
+    parser.add_argument(
+        "--api-secret", type=str, default=BINANCE_API_SECRET,
+        help="Binance gizli anahtarı (bot.py içindeki BINANCE_API_SECRET değerini override eder)"
+    )
 
     args = parser.parse_args()
 
     token = args.token
-    chat_id = args.chat_id
-    timeframe = args.timeframe
+    api_key = args.api_key
+    api_secret = args.api_secret
 
     if not token:
         print("HATA: Telegram bot token gereklidir. --token parametresi ile belirtin.")
         print("       veya bot.py içindeki TELEGRAM_TOKEN sabitini doldurun.")
         sys.exit(1)
 
-    if not chat_id:
-        print("HATA: Telegram chat ID gereklidir. --chat-id parametresi ile belirtin.")
-        sys.exit(1)
+    if args.multi:
+        # ─── Çoklu timeframe modu ───
+        if not args.tf:
+            print("HATA: --multi modunda en az bir --tf TIMEFRAME:CHAT_ID çifti gereklidir.")
+            print("Örnek: --tf 1H:-100111 --tf 4H:-100222")
+            sys.exit(1)
 
-    # Loglama kur
-    loglama_kur(timeframe)
-    log.info("Bot başlatılıyor: Timeframe=%s, Chat ID=%s", timeframe.upper(), chat_id)
+        # Ana process loglama (genel bilgiler için)
+        loglama_kur("MULTI")
+        log.info("Çoklu timeframe modu başlatılıyor: %d timeframe", len(args.tf))
 
-    try:
-        asyncio.run(ana_dongu(token, chat_id, timeframe))
-    except KeyboardInterrupt:
-        log.info("Bot kapatıldı.")
+        processler = []
+        for tf_chat in args.tf:
+            if ":" not in tf_chat:
+                print(f"HATA: Geçersiz --tf formatı: '{tf_chat}'. Beklenen: TIMEFRAME:CHAT_ID")
+                sys.exit(1)
+            timeframe, chat_id = tf_chat.split(":", 1)
+            timeframe = timeframe.upper()
+            p = multiprocessing.Process(
+                target=process_calistir,
+                args=(token, chat_id, timeframe, api_key, api_secret),
+                name=f"Bot-{timeframe}"
+            )
+            processler.append(p)
+            p.start()
+            log.info("Process başlatıldı: %s (PID: %d)", p.name, p.pid)
+
+        # Tüm process'lerin bitmesini bekle
+        try:
+            for p in processler:
+                p.join()
+        except KeyboardInterrupt:
+            log.info("Tüm process'ler durduruluyor...")
+            for p in processler:
+                p.terminate()
+            for p in processler:
+                p.join()
+            log.info("Bot kapatıldı.")
+    else:
+        # ─── Tek timeframe modu (eski davranış) ───
+        chat_id = args.chat_id
+        timeframe = args.timeframe
+
+        if not chat_id:
+            print("HATA: Telegram chat ID gereklidir. --chat-id parametresi ile belirtin.")
+            sys.exit(1)
+
+        # Global API anahtarlarını güncelle
+        if api_key:
+            BINANCE_API_KEY = api_key
+        if api_secret:
+            BINANCE_API_SECRET = api_secret
+
+        # Loglama kur
+        loglama_kur(timeframe)
+        log.info("Bot başlatılıyor: Timeframe=%s, Chat ID=%s", timeframe.upper(), chat_id)
+
+        try:
+            asyncio.run(ana_dongu(token, chat_id, timeframe))
+        except KeyboardInterrupt:
+            log.info("Bot kapatıldı.")
 
 
 if __name__ == "__main__":

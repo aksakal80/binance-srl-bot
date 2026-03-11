@@ -14,8 +14,254 @@ Binance USDT spot paritelerini tarayarak destek ve direnç seviyelerine yaklaşa
 - **5/5 Güven Skoru** — RSI, Volume Spike, Williams %R, EMA Trend, Zone 1 bonusu
 - **3 Panelli Grafik** — Mum (EMA dahil) + RSI (40/60 çizgileri) + Volume
 - **Best 20 Listesi** — En güçlü 20 Destek ve 20 Direnç sinyali ayrı ayrı gönderilir
-- **Çoklu Timeframe** — 1m'den 1w'ye kadar tüm Binance timeframe'leri desteklenir
-- **Otomatik Loglama** — Konsol, `bot_TF.log` ve `errors.log` ayrı ayrı
+- **Çoklu Timeframe (Multiprocessing)** — Tek komutla 5 timeframe paralel çalıştırma desteği
+- **Binance API Anahtarı** — API key ile rate limit 1200 → 6000 ağırlık (key olmadan da çalışır)
+- **Otomatik Loglama** — Her process kendi `bot_{TF}.log` dosyasına yazar, hata `errors.log`'a
+
+---
+
+## Gereksinimler
+
+- Python 3.11+
+- Telegram Bot Token ([@BotFather](https://t.me/BotFather) üzerinden oluşturun)
+- Telegram Chat ID
+- Binance API anahtarı (opsiyonel, rate limit artışı için önerilir)
+
+---
+
+## Kurulum
+
+```bash
+# Repoyu klonla
+git clone https://github.com/aksakal80/binance-srl-bot.git
+cd binance-srl-bot
+
+# Kütüphaneleri kur
+pip install -r requirements.txt
+```
+
+---
+
+## Binance API Anahtarı
+
+Binance API anahtarı **opsiyoneldir** — bot public endpoint'leri (fiyat ve mum verisi) kullandığından key olmadan da çalışır. Ancak key ile Binance rate limit önemli ölçüde artar (1200 → 6000 ağırlık/dakika), bu da çok sayıda coin tararken daha güvenli çalışma sağlar.
+
+### API Anahtarını Ayarlama
+
+**Yöntem 1 — bot.py içinde (kalıcı):**
+
+`bot.py` dosyasının başındaki `BÖLÜM 0` kısmını düzenleyin:
+
+```python
+# ─── Binance API ───
+BINANCE_API_KEY    = "buraya_api_anahtarinizi_yazin"
+BINANCE_API_SECRET = "buraya_gizli_anahtarinizi_yazin"
+```
+
+**Yöntem 2 — Komut satırı argümanı:**
+
+```bash
+python bot.py --token BOT_TOKEN --chat-id CHAT_ID --api-key API_KEY --api-secret API_SECRET
+```
+
+> **Not:** Binance API anahtarı oluştururken sadece **Okuma** iznini verin. Emir verme (spot/futures trade) izni gerekmez.
+
+---
+
+## Başlatma
+
+### Tek timeframe (klasik kullanım)
+
+```bash
+# Varsayılan 1h timeframe
+python bot.py --token BOT_TOKEN --chat-id CHAT_ID
+
+# 4 saatlik mum
+python bot.py --token BOT_TOKEN --chat-id CHAT_ID --timeframe 4h
+
+# Günlük mum
+python bot.py --token BOT_TOKEN --chat-id CHAT_ID --timeframe 1d
+
+# 15 dakikalık mum
+python bot.py --token BOT_TOKEN --chat-id CHAT_ID --timeframe 15m
+```
+
+### Çoklu timeframe — multiprocessing ile tek komut (YENİ)
+
+```bash
+python bot.py --token BOT_TOKEN --multi \
+    --tf 1H:-100111 \
+    --tf 4H:-100222 \
+    --tf 8H:-100333 \
+    --tf 12H:-100444 \
+    --tf 1D:-100555
+```
+
+Her `--tf` argümanı `TIMEFRAME:CHAT_ID` formatındadır. Her timeframe ayrı bir Telegram kanalına sinyal gönderebilir.
+
+---
+
+## Tüm Komut Satırı Argümanları
+
+| Argüman | Açıklama | Örnek |
+|---------|----------|-------|
+| `--token` | Telegram bot token | `--token 123456:ABC...` |
+| `--chat-id` | Telegram chat ID (tek timeframe modunda) | `--chat-id -100123456` |
+| `--timeframe` | Mum timeframe (tek mod) | `--timeframe 4h` |
+| `--multi` | Çoklu timeframe modunu etkinleştirir | `--multi` |
+| `--tf` | Timeframe:ChatID çifti (multi modda tekrarlanabilir) | `--tf 1H:-100111` |
+| `--api-key` | Binance API anahtarı (bot.py'yi override eder) | `--api-key abc123` |
+| `--api-secret` | Binance gizli anahtarı (bot.py'yi override eder) | `--api-secret xyz789` |
+
+---
+
+## Yapılandırma (bot.py Sabitleri)
+
+`bot.py` dosyasının başında yer alan sabitler:
+
+| Sabit | Varsayılan | Açıklama |
+|-------|-----------|----------|
+| `TELEGRAM_TOKEN` | `""` | Telegram bot token (--token ile override edilebilir) |
+| `TELEGRAM_CHAT_ID` | `""` | Varsayılan chat ID |
+| `BINANCE_API_KEY` | `""` | Binance API anahtarı (--api-key ile override edilebilir) |
+| `BINANCE_API_SECRET` | `""` | Binance gizli anahtarı (--api-secret ile override edilebilir) |
+| `ACTIVE_TIMEFRAME` | `"1h"` | Varsayılan timeframe |
+| `CANDLE_LIMIT` | `300` | Çekilecek mum sayısı |
+| `SCAN_INTERVAL_SEC` | `900` | Tarama aralığı (saniye, varsayılan 15 dakika) |
+| `NEAR_PCT` | `1.0` | YAKIN sinyal eşiği (%) |
+| `APPROACH_PCT` | `3.0` | YAKLAŞIYOR sinyal eşiği (%) |
+| `MIN_CONFIDENCE` | `2` | Gönderilecek minimum güven skoru |
+| `RSI_PERIOD` | `14` | RSI hesaplama periyodu |
+| `RSI_SUPPORT_MAX` | `40` | Destek için RSI onay eşiği (RSI < 40) |
+| `RSI_RESIST_MIN` | `60` | Direnç için RSI onay eşiği (RSI > 60) |
+| `VOL_SPIKE_MULT` | `1.5` | Volume Spike çarpanı (son hacim > ort × 1.5) |
+| `VOL_LOOKBACK` | `20` | Volume Spike için geriye bakış periyodu |
+| `WR_PERIOD` | `10` | Williams %R periyodu |
+| `EMA_SHORT` | `20` | Kısa EMA periyodu |
+| `EMA_LONG` | `50` | Uzun EMA periyodu |
+| `SWING_WINDOW` | `2` | Swing High/Low penceresi |
+| `CLUSTER_TOL_PCT` | `0.3` | Kümeleme toleransı (%) |
+| `MIN_VOLUME_USDT` | `500_000` | Minimum 24s hacim filtresi (USDT) |
+| `BEST_N` | `20` | Best N listesi boyutu |
+| `CHART_CANDLES` | `80` | Grafikte gösterilecek son mum sayısı |
+
+---
+
+## Mesaj Formatı
+
+### Bireysel Sinyal Mesajı
+
+```
+📊 COIN: BTCUSDT
+⏱ Timeframe: 1H
+💲 Fiyat: 65432.10 USDT
+🕐 10.03.2026 · 14:00 UTC
+━━━━━━━━━━━━━━━━━━━━━━━
+🟢 DESTEK YAKIN (%0.72) · Zone 1 ★★★
+
+🟢 DESTEK SEVİYELERİ (Yakından Uzağa)
+  S1: 64960.00  → Güç: Zone 1 ★★★
+  S2: 63500.00  → Güç: Zone 2 ★★
+  S3: 62000.00  → Güç: Zone 3 ⚠️
+
+🔴 DİRENÇ SEVİYELERİ (Yakından Uzağa)
+  R1: 66000.00  → Güç: Zone 2 ★★
+  R2: 67500.00  → Güç: Zone 1 ★★★
+  R3: 70000.00  → Güç: Zone 3 ⚠️
+━━━━━━━━━━━━━━━━━━━━━━━
+📉 RSI (14): 37.4  🔥 Güçlü
+📈 Volume Spike: ✅ VAR (×2.31 ort.)
+📊 Williams %R: -82.5  ✅ Onaylandı
+📈 EMA Trend: ✅ Uyumlu
+⭐ Güven Skoru: 5/5  ★★★★★
+━━━━━━━━━━━━━━━━━━━━━━━
+_Binance SRL Bot · v3.0_
+```
+
+### Best 20 Listesi
+
+```
+🟢 BEST 20 DESTEK — 1H — En Yakın Destek Seviyeleri
+🕐 10.03.2026 · 14:00 UTC
+────────────────────────────
+
+🥇 #1  BTCUSDT · 1H
+   🟢 DESTEK YAKIN · Zone 1 ★★★ · %0.72
+   Seviye: 64960.00  RSI: 37.4  ✅
+   Vol Spike: ✅ ×2.31 · W%R: -82.5 ✅ · EMA: ✅
+   ⭐ Güven: 5/5  ★★★★★
+...
+────────────────────────────
+_Binance SRL Bot · v3.0_
+```
+
+---
+
+## Grafik Açıklaması (3 Panel)
+
+```
+┌─────────────────────────────────────────────┐
+│  ÜST PANEL: Mum Grafik                      │
+│  • OHLC mumlar (yeşil = yükseliş, kırmızı = düşüş)  │
+│  • Destek çizgileri: yeşil kesikli  ─ ─ ─   │
+│  • Direnç çizgileri: kırmızı kesikli ─ ─ ─  │
+│  • EMA 20: mavi çizgi                       │
+│  • EMA 50: turuncu çizgi                    │
+│  • Etiketler: S1 [Z1 ★★★], R1 [Z2 ★★]      │
+├─────────────────────────────────────────────┤
+│  ORTA PANEL: RSI                            │
+│  • RSI çizgisi (mor)                        │
+│  • 40 ve 60 kırmızı referans çizgileri      │
+│  • Aşırı alım/satım bölgeleri vurgulı       │
+├─────────────────────────────────────────────┤
+│  ALT PANEL: Volume                          │
+│  • Yükseliş = yeşil, Düşüş = kırmızı       │
+└─────────────────────────────────────────────┘
+```
+
+---
+
+## Önemli Notlar
+
+### S1 ≠ Zone 1
+- **S1** = Fiyata en yakın destek seviyesi (mesafeye göre sıralama)
+- **Zone 1** = En güçlü seviye (güç skoruna göre sınıflandırma)
+- S1 Zone 3 ⚠️ olabilir, S3 Zone 1 ★★★ olabilir — bunlar **bağımsız** sınıflandırmadır
+
+### Güven Skoru (Maks 5/5)
+| Kriter | Destek | Direnç | Puan |
+|--------|--------|--------|------|
+| RSI | RSI < 40 | RSI > 60 | +1 |
+| Volume Spike | Hacim > ort × 1.5 | Hacim > ort × 1.5 | +1 |
+| Williams %R | W%R < -80 | W%R > -20 | +1 |
+| EMA Trend | Fiyat > EMA50 | Fiyat < EMA50 | +1 |
+| Zone 1 Bonusu | Seviye Zone 1 ise | Seviye Zone 1 ise | +1 |
+
+### Gönderim Sırası (Her 15 Dakika)
+1. 🟢 Bireysel destek sinyalleri (grafik ile, güven yüksekten düşüğe)
+2. 🔴 Bireysel direnç sinyalleri (grafik ile, güven yüksekten düşüğe)
+3. 🟢 Best 20 Destek listesi (metin)
+4. 🔴 Best 20 Direnç listesi (metin)
+
+---
+
+## Loglama
+
+Her process kendi log dosyasına yazar (multiprocessing modunda da ayrı tutulur):
+
+| Dosya | Seviye | İçerik |
+|-------|--------|--------|
+| Konsol (stdout) | INFO | Tarama ilerlemesi, sinyal sayısı (`[TF]` etiketi ile) |
+| `bot_1H.log` | DEBUG | Tüm detaylar (timeframe'e özel) |
+| `bot_4H.log` | DEBUG | Tüm detaylar (timeframe'e özel) |
+| `errors.log` | ERROR | Hatalar ve istisnalar (tüm process'lerden) |
+
+---
+
+## Lisans
+
+MIT
+
 
 ---
 
