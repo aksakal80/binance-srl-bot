@@ -44,30 +44,33 @@ pip install -r requirements.txt
 
 ---
 
-## ⚙️ Kimlik Bilgilerini Ayarlama (.env Dosyası — Önerilen Yöntem)
+## ⚙️ Kimlik Bilgilerini Ayarlama (bot.py Dosyasını Düzenle)
 
-> **⚠️ GÜVENLİK:** API anahtarlarınızı ve Telegram token'ınızı doğrudan `bot.py`'e **yazmayın**. Bu dosya GitHub'a gider ve herkes görebilir. Bunun yerine `.env` dosyası kullanın.
+`bot.py` dosyasını bir metin editörüyle (Notepad, VS Code, vb.) açın.
+Dosyanın başındaki şu satırları bulun ve kendi bilgilerinizi girin:
 
-### 1. .env Dosyası Oluşturun
+```python
+# ─── Telegram ───
+TELEGRAM_TOKEN     = ""   # ← BotFather'dan aldığınız token (örn: "123456:ABC-DEF...")
+TELEGRAM_CHAT_ID   = ""   # ← Grubun ID'si (örn: "-1001234567890")
+TELEGRAM_THREAD_ID = ""   # ← Forum alt konu ID (yoksa boş bırakın)
 
-Repo klasöründe `.env` adında yeni bir dosya oluşturun (`.env.example` şablonunu kopyalayabilirsiniz):
-
-```bash
-cp .env.example .env
+# ─── Binance API ───
+BINANCE_API_KEY    = ""   # ← Binance API anahtarınız (opsiyonel, boş bırakılabilir)
+BINANCE_API_SECRET = ""   # ← Binance gizli anahtarınız (opsiyonel, boş bırakılabilir)
 ```
 
-Ardından `.env` dosyasını bir metin editörüyle açıp gerçek değerlerinizi yazın:
+Örnek dolu hâli:
 
+```python
+TELEGRAM_TOKEN     = "8576023339:AAFoHQ5YfN..."
+TELEGRAM_CHAT_ID   = "-1003880760948"
+TELEGRAM_THREAD_ID = ""
+BINANCE_API_KEY    = "nCNQe7GcuSq..."
+BINANCE_API_SECRET = "rwBWrQybI6Tl..."
 ```
-TELEGRAM_TOKEN=8576023339:AAFoHQ5YfN...
-TELEGRAM_CHAT_ID=-1003880760948
-BINANCE_API_KEY=nCNQe7GcuSq...
-BINANCE_API_SECRET=rwBWrQybI6Tl...
-```
 
-### 2. Botu Başlatın
-
-`.env` dosyası hazırlandıktan sonra botu şu komutla çalıştırın (ayrıca `--token` vs. vermenize gerek kalmaz):
+Kaydedin ve botu başlatın:
 
 ```bash
 # 5 timeframe — her biri kendi forum alt konusuna
@@ -78,8 +81,6 @@ python bot.py --multi \
     --tf 12H:-1003880760948:13 \
     --tf 1D:-1003880760948:9
 ```
-
-> **`.env` dosyası GitHub'a gönderilmez** — `.gitignore` tarafından hariç tutulur. Sadece kendi bilgisayarınızda kalır.
 
 ---
 
@@ -125,13 +126,13 @@ Bot, Telegram **forum gruplarındaki** alt konulara (topics) doğrudan sinyal g�
 1. Bota grupta herhangi bir mesaj gönderin (alt konu içinden)
 2. Botun günlüğünü (log) kontrol edin — gelen güncelleme içinde `message_thread_id` değerini göreceksiniz
 
-### bot.py İçinde Kalıcı Olarak Ayarlama
+### bot.py İçindeki Sabitler
 
 ```python
 # ─── Telegram ───
-TELEGRAM_TOKEN    = "123456:ABCdef..."   # Bot token
-TELEGRAM_CHAT_ID  = "-1001234567890"     # Grubun ID'si (tüm konular için aynı)
-TELEGRAM_THREAD_ID = "12345"             # Tek timeframe modunda varsayılan konu ID'si
+TELEGRAM_TOKEN     = "123456:ABCdef..."   # Bot token
+TELEGRAM_CHAT_ID   = "-1001234567890"     # Grubun ID'si (tüm konular için aynı)
+TELEGRAM_THREAD_ID = "12345"              # Tek timeframe modunda varsayılan konu ID'si
 ```
 
 > **Not:** Çoklu timeframe (`--multi`) modunda her `--tf` argümanına ayrı Thread ID vermeniz gerekir (aşağıya bakın).
