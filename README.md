@@ -15,6 +15,7 @@ Binance USDT spot paritelerini tarayarak destek ve direnç seviyelerine yaklaşa
 - **3 Panelli Grafik** — Mum (EMA dahil) + RSI (40/60 çizgileri) + Volume
 - **Best 20 Listesi** — En güçlü 20 Destek ve 20 Direnç sinyali ayrı ayrı gönderilir
 - **Çoklu Timeframe (Multiprocessing)** — Tek komutla 5 timeframe paralel çalıştırma desteği
+- **Telegram Forum Konusu (Alt Konu) Desteği** — Her timeframe sinyallerini farklı bir forum alt konusuna gönderir
 - **Binance API Anahtarı** — API key ile rate limit 1200 → 6000 ağırlık (key olmadan da çalışır)
 - **Otomatik Loglama** — Her process kendi `bot_{TF}.log` dosyasına yazar, hata `errors.log`'a
 
@@ -24,7 +25,8 @@ Binance USDT spot paritelerini tarayarak destek ve direnç seviyelerine yaklaşa
 
 - Python 3.11+
 - Telegram Bot Token ([@BotFather](https://t.me/BotFather) üzerinden oluşturun)
-- Telegram Chat ID
+- Telegram Chat ID (grup ID'si)
+- Telegram Forum Konu ID'leri (Telegram forum grubundaki her alt konunun ID'si — opsiyonel)
 - Binance API anahtarı (opsiyonel, rate limit artışı için önerilir)
 
 ---
@@ -68,36 +70,97 @@ python bot.py --token BOT_TOKEN --chat-id CHAT_ID --api-key API_KEY --api-secret
 
 ---
 
+## Telegram Forum Konusu (Alt Konu) Kurulumu
+
+Bot, Telegram **forum gruplarındaki** alt konulara (topics) doğrudan sinyal gönderebilir. 5 ayrı timeframe için 5 ayrı alt konu açtıysanız her biri farklı bir konuya yönlendirilebilir.
+
+### Chat ID ve Topic (Thread) ID Nedir?
+
+| Değer | Açıklama | Örnek |
+|-------|----------|-------|
+| **Chat ID** | Telegram grubunuzun ID'si — tüm konular için aynıdır | `-1001234567890` |
+| **Thread ID** | Her alt konunun (topic) kendine özel ID'si | `12345`, `67890` |
+
+> ⚠️ Chat ID ve Thread ID farklı şeylerdir. "Alt konunun linki" = Thread ID'dir. Her 5 alt konunun farklı bir Thread ID'si vardır, ama hepsinin Chat ID'si aynı grup ID'sidir.
+
+### Thread ID'yi Nasıl Bulursunuz?
+
+**Yöntem 1 — Telegram Web Uygulaması:**
+1. [web.telegram.org](https://web.telegram.org) adresine gidin
+2. Grubunuzu açın, ilgili alt konuya (topic) tıklayın
+3. Tarayıcının adres çubuğuna bakın:
+   ```
+   https://web.telegram.org/k/#-1001234567890_12345
+                                        ^grup_id  ^thread_id
+   ```
+   Alttaki sayı (`12345`) Thread ID'dir.
+
+**Yöntem 2 — @getidsbot:**
+1. Telegram'da [@getidsbot](https://t.me/getidsbot)'u açın
+2. İlgili alt konudan herhangi bir mesajı bu bota iletin (forward edin)
+3. Bot size `Message thread ID: 12345` gibi bir yanıt verecektir
+
+**Yöntem 3 — Bot günlüğü:**
+1. Bota grupta herhangi bir mesaj gönderin (alt konu içinden)
+2. Botun günlüğünü (log) kontrol edin — gelen güncelleme içinde `message_thread_id` değerini göreceksiniz
+
+### bot.py İçinde Kalıcı Olarak Ayarlama
+
+```python
+# ─── Telegram ───
+TELEGRAM_TOKEN    = "123456:ABCdef..."   # Bot token
+TELEGRAM_CHAT_ID  = "-1001234567890"     # Grubun ID'si (tüm konular için aynı)
+TELEGRAM_THREAD_ID = "12345"             # Tek timeframe modunda varsayılan konu ID'si
+```
+
+> **Not:** Çoklu timeframe (`--multi`) modunda her `--tf` argümanına ayrı Thread ID vermeniz gerekir (aşağıya bakın).
+
+---
+
 ## Başlatma
 
-### Tek timeframe (klasik kullanım)
+### Tek timeframe — forum konusuz (klasik kullanım)
 
 ```bash
 # Varsayılan 1h timeframe
-python bot.py --token BOT_TOKEN --chat-id CHAT_ID
+python bot.py --token BOT_TOKEN --chat-id -100GRUBID
 
 # 4 saatlik mum
-python bot.py --token BOT_TOKEN --chat-id CHAT_ID --timeframe 4h
-
-# Günlük mum
-python bot.py --token BOT_TOKEN --chat-id CHAT_ID --timeframe 1d
-
-# 15 dakikalık mum
-python bot.py --token BOT_TOKEN --chat-id CHAT_ID --timeframe 15m
+python bot.py --token BOT_TOKEN --chat-id -100GRUBID --timeframe 4h
 ```
 
-### Çoklu timeframe — multiprocessing ile tek komut (YENİ)
+### Tek timeframe — forum konusuna gönder
+
+```bash
+# 1 saatlik timeframe, sinyal "1H Sinyalleri" konusuna gider
+python bot.py --token BOT_TOKEN --chat-id -100GRUBID --thread-id 12345 --timeframe 1h
+```
+
+### Çoklu timeframe — her biri farklı forum konusuna (önerilen kullanım)
+
+```bash
+# 5 timeframe paralel başlatılır, her biri kendi forum alt konusuna yazar
+python bot.py --token BOT_TOKEN --multi \
+    --tf 1H:-100GRUBID:11111 \
+    --tf 4H:-100GRUBID:22222 \
+    --tf 8H:-100GRUBID:33333 \
+    --tf 12H:-100GRUBID:44444 \
+    --tf 1D:-100GRUBID:55555
+```
+
+`--tf` argümanı `TIMEFRAME:CHAT_ID:THREAD_ID` formatındadır.
+- `1H` — timeframe
+- `-100GRUBID` — grubun chat ID'si (tüm satırlarda aynı)
+- `11111` — o timeframe için açtığınız forum alt konusunun Thread ID'si
+
+### Forum konusu olmayan çoklu timeframe (eski format, hâlâ desteklenir)
 
 ```bash
 python bot.py --token BOT_TOKEN --multi \
     --tf 1H:-100111 \
     --tf 4H:-100222 \
-    --tf 8H:-100333 \
-    --tf 12H:-100444 \
-    --tf 1D:-100555
+    --tf 4H:-100333
 ```
-
-Her `--tf` argümanı `TIMEFRAME:CHAT_ID` formatındadır. Her timeframe ayrı bir Telegram kanalına sinyal gönderebilir.
 
 ---
 
@@ -106,12 +169,15 @@ Her `--tf` argümanı `TIMEFRAME:CHAT_ID` formatındadır. Her timeframe ayrı b
 | Argüman | Açıklama | Örnek |
 |---------|----------|-------|
 | `--token` | Telegram bot token | `--token 123456:ABC...` |
-| `--chat-id` | Telegram chat ID (tek timeframe modunda) | `--chat-id -100123456` |
+| `--chat-id` | Telegram grup chat ID | `--chat-id -1001234567890` |
+| `--thread-id` | Forum alt konu (topic) ID — tek timeframe modunda | `--thread-id 12345` |
 | `--timeframe` | Mum timeframe (tek mod) | `--timeframe 4h` |
 | `--multi` | Çoklu timeframe modunu etkinleştirir | `--multi` |
-| `--tf` | Timeframe:ChatID çifti (multi modda tekrarlanabilir) | `--tf 1H:-100111` |
+| `--tf` | `TIMEFRAME:CHAT_ID:THREAD_ID` üçlüsü (multi modda tekrarlanabilir) | `--tf 1H:-100GRUBID:12345` |
 | `--api-key` | Binance API anahtarı (bot.py'yi override eder) | `--api-key abc123` |
 | `--api-secret` | Binance gizli anahtarı (bot.py'yi override eder) | `--api-secret xyz789` |
+
+> Thread ID **opsiyoneldir** — forum konusu kullanmıyorsanız sadece `TIMEFRAME:CHAT_ID` formatını kullanabilirsiniz.
 
 ---
 
@@ -122,7 +188,8 @@ Her `--tf` argümanı `TIMEFRAME:CHAT_ID` formatındadır. Her timeframe ayrı b
 | Sabit | Varsayılan | Açıklama |
 |-------|-----------|----------|
 | `TELEGRAM_TOKEN` | `""` | Telegram bot token (--token ile override edilebilir) |
-| `TELEGRAM_CHAT_ID` | `""` | Varsayılan chat ID |
+| `TELEGRAM_CHAT_ID` | `""` | Varsayılan grup chat ID (--chat-id ile override edilebilir) |
+| `TELEGRAM_THREAD_ID` | `""` | Varsayılan forum konu ID'si — opsiyonel (--thread-id ile override edilebilir) |
 | `BINANCE_API_KEY` | `""` | Binance API anahtarı (--api-key ile override edilebilir) |
 | `BINANCE_API_SECRET` | `""` | Binance gizli anahtarı (--api-secret ile override edilebilir) |
 | `ACTIVE_TIMEFRAME` | `"1h"` | Varsayılan timeframe |

@@ -30,7 +30,8 @@ import matplotlib.patches as mpatches
 
 # ─── Telegram ───
 TELEGRAM_TOKEN    = ""          # Bot token (--token ile override edilir)
-TELEGRAM_CHAT_ID  = ""          # Chat ID (--chat-id ile override edilir)
+TELEGRAM_CHAT_ID  = ""          # Grup Chat ID — örnek: -1001234567890
+TELEGRAM_THREAD_ID = ""         # Forum konu (topic) ID — opsiyonel, alt konu varsa doldur
 
 # ─── Timeframe ───
 ACTIVE_TIMEFRAME  = "1h"        # --timeframe ile override edilir
@@ -866,14 +867,20 @@ def best20_mesaji_olustur(sinyaller: list[dict], tur: str, timeframe: str) -> st
     return "\n".join(satirlar)
 
 
-async def telegram_mesaj_gonder(token: str, chat_id: str, metin: str) -> bool:
-    """Telegram'a metin mesajı gönderir."""
+async def telegram_mesaj_gonder(token: str, chat_id: str, metin: str, thread_id: str = "") -> bool:
+    """Telegram'a metin mesajı gönderir.
+    thread_id verilirse mesaj ilgili forum konusuna (alt konuya) gönderilir."""
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": metin,
         "parse_mode": "Markdown",
     }
+    if thread_id:
+        try:
+            payload["message_thread_id"] = int(thread_id)
+        except ValueError:
+            log.warning("Geçersiz thread_id değeri '%s', forum konusu olmadan gönderiliyor.", thread_id)
     try:
         resp = requests.post(url, json=payload, timeout=30)
         resp.raise_for_status()
@@ -883,14 +890,21 @@ async def telegram_mesaj_gonder(token: str, chat_id: str, metin: str) -> bool:
         return False
 
 
-async def telegram_foto_gonder(token: str, chat_id: str, foto_yolu: str, caption: str = "") -> bool:
-    """Telegram'a fotoğraf gönderir."""
+async def telegram_foto_gonder(token: str, chat_id: str, foto_yolu: str, caption: str = "", thread_id: str = "") -> bool:
+    """Telegram'a fotoğraf gönderir.
+    thread_id verilirse fotoğraf ilgili forum konusuna (alt konuya) gönderilir."""
     url = f"https://api.telegram.org/bot{token}/sendPhoto"
     try:
+        form_data = {"chat_id": chat_id, "caption": caption[:1024], "parse_mode": "Markdown"}
+        if thread_id:
+            try:
+                form_data["message_thread_id"] = int(thread_id)
+            except ValueError:
+                log.warning("Geçersiz thread_id değeri '%s', forum konusu olmadan gönderiliyor.", thread_id)
         with open(foto_yolu, "rb") as f:
             resp = requests.post(
                 url,
-                data={"chat_id": chat_id, "caption": caption[:1024], "parse_mode": "Markdown"},
+                data=form_data,
                 files={"photo": f},
                 timeout=60
             )
@@ -901,30 +915,31 @@ async def telegram_foto_gonder(token: str, chat_id: str, foto_yolu: str, caption
         return False
 
 
-async def sinyal_gonder(token: str, chat_id: str, sinyal: dict):
+async def sinyal_gonder(token: str, chat_id: str, sinyal: dict, thread_id: str = ""):
     """Tek sinyali grafik + mesaj olarak gönderir."""
     mesaj = sinyal_mesaji_olustur(sinyal)
     grafik_yolu = grafik_olustur(sinyal)
 
     if grafik_yolu and os.path.exists(grafik_yolu):
-        basarili = await telegram_foto_gonder(token, chat_id, grafik_yolu, caption=mesaj)
+        basarili = await telegram_foto_gonder(token, chat_id, grafik_yolu, caption=mesaj, thread_id=thread_id)
         try:
             os.remove(grafik_yolu)
         except Exception:
             pass
         if not basarili:
-            await telegram_mesaj_gonder(token, chat_id, mesaj)
+            await telegram_mesaj_gonder(token, chat_id, mesaj, thread_id=thread_id)
     else:
-        await telegram_mesaj_gonder(token, chat_id, mesaj)
+        await telegram_mesaj_gonder(token, chat_id, mesaj, thread_id=thread_id)
 
 
 # ═══════════════════════════════════════════════
 # BÖLÜM F — ANA DÖNGÜ
 # ═══════════════════════════════════════════════
 
-async def tarama_yap(token: str, chat_id: str, timeframe: str):
+async def tarama_yap(token: str, chat_id: str, timeframe: str, thread_id: str = ""):
     """
     Tüm sembolleri tarar, sinyalleri tespit eder ve Telegram'a gönderir.
+    thread_id verilirse mesajlar ilgili forum konusuna (alt konuya) gönderilir.
     Gönderim sırası:
     1. Destek sinyalleri (grafik ile)
     2. Direnç sinyalleri (grafik ile)
@@ -973,7 +988,7 @@ async def tarama_yap(token: str, chat_id: str, timeframe: str):
     # 1. Destek sinyalleri gönder
     for sinyal in destek_sinyalleri:
         try:
-            await sinyal_gonder(token, chat_id, sinyal)
+            await sinyal_gonder(token, chat_id, sinyal, thread_id=thread_id)
             await asyncio.sleep(1)
         except Exception as e:
             log.error("Destek sinyali gönderme hatası (%s): %s", sinyal.get("sembol"), e)
@@ -981,7 +996,7 @@ async def tarama_yap(token: str, chat_id: str, timeframe: str):
     # 2. Direnç sinyalleri gönder
     for sinyal in direnc_sinyalleri:
         try:
-            await sinyal_gonder(token, chat_id, sinyal)
+            await sinyal_gonder(token, chat_id, sinyal, thread_id=thread_id)
             await asyncio.sleep(1)
         except Exception as e:
             log.error("Direnç sinyali gönderme hatası (%s): %s", sinyal.get("sembol"), e)
@@ -990,7 +1005,7 @@ async def tarama_yap(token: str, chat_id: str, timeframe: str):
     if destek_sinyalleri:
         best20_destek = best20_mesaji_olustur(destek_sinyalleri, "DESTEK", timeframe)
         try:
-            await telegram_mesaj_gonder(token, chat_id, best20_destek)
+            await telegram_mesaj_gonder(token, chat_id, best20_destek, thread_id=thread_id)
         except Exception as e:
             log.error("Best 20 Destek gönderme hatası: %s", e)
 
@@ -998,7 +1013,7 @@ async def tarama_yap(token: str, chat_id: str, timeframe: str):
     if direnc_sinyalleri:
         best20_direnc = best20_mesaji_olustur(direnc_sinyalleri, "DİRENÇ", timeframe)
         try:
-            await telegram_mesaj_gonder(token, chat_id, best20_direnc)
+            await telegram_mesaj_gonder(token, chat_id, best20_direnc, thread_id=thread_id)
         except Exception as e:
             log.error("Best 20 Direnç gönderme hatası: %s", e)
 
@@ -1011,17 +1026,19 @@ async def tarama_yap(token: str, chat_id: str, timeframe: str):
     )
 
 
-async def ana_dongu(token: str, chat_id: str, timeframe: str):
+async def ana_dongu(token: str, chat_id: str, timeframe: str, thread_id: str = ""):
     """Ana tarama döngüsü — her SCAN_INTERVAL_SEC saniyede bir çalışır."""
     log.info("Binance SRL Sinyal Botu v3.0 başlatıldı")
     log.info("Timeframe: %s | Tarama aralığı: %d saniye", timeframe.upper(), SCAN_INTERVAL_SEC)
+    if thread_id:
+        log.info("Forum konu ID (thread_id): %s", thread_id)
 
     # Geçici grafik klasörü oluştur
     Path(CHART_TEMP_DIR).mkdir(exist_ok=True)
 
     while True:
         try:
-            await tarama_yap(token, chat_id, timeframe)
+            await tarama_yap(token, chat_id, timeframe, thread_id=thread_id)
         except KeyboardInterrupt:
             log.info("Bot durduruldu (Ctrl+C)")
             break
@@ -1033,7 +1050,7 @@ async def ana_dongu(token: str, chat_id: str, timeframe: str):
         await asyncio.sleep(SCAN_INTERVAL_SEC)
 
 
-def process_calistir(token: str, chat_id: str, timeframe: str, api_key: str, api_secret: str):
+def process_calistir(token: str, chat_id: str, timeframe: str, api_key: str, api_secret: str, thread_id: str = ""):
     """Multiprocessing modunda her timeframe için ayrı process'te çalışan fonksiyon."""
     global BINANCE_API_KEY, BINANCE_API_SECRET
     # Argparse'tan gelen değerlerle global sabitleri güncelle
@@ -1044,10 +1061,12 @@ def process_calistir(token: str, chat_id: str, timeframe: str, api_key: str, api
 
     # Her process kendi log dosyasına yazar
     loglama_kur(timeframe)
-    log.info("Process başlatıldı: Timeframe=%s, Chat ID=%s (PID: %d)",
-             timeframe.upper(), chat_id, multiprocessing.current_process().pid)
+    log.info("Process başlatıldı: Timeframe=%s, Chat ID=%s%s (PID: %d)",
+             timeframe.upper(), chat_id,
+             f", Thread ID={thread_id}" if thread_id else "",
+             multiprocessing.current_process().pid)
     try:
-        asyncio.run(ana_dongu(token=token, chat_id=chat_id, timeframe=timeframe))
+        asyncio.run(ana_dongu(token=token, chat_id=chat_id, timeframe=timeframe, thread_id=thread_id))
     except KeyboardInterrupt:
         log.info("Process durduruldu (Ctrl+C): Timeframe=%s", timeframe.upper())
 
@@ -1060,17 +1079,24 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Örnek kullanım:
-  # Tek timeframe (eski davranış):
-  python bot.py --token BOT_TOKEN --chat-id CHAT_ID
-  python bot.py --token BOT_TOKEN --chat-id CHAT_ID --timeframe 4h
+  # Tek timeframe — forum konusuz:
+  python bot.py --token BOT_TOKEN --chat-id -100GRUBID --timeframe 1h
 
-  # Tüm timeframe'ler paralel (YENİ — multiprocessing):
+  # Tek timeframe — forum konusu ile (alt konu):
+  python bot.py --token BOT_TOKEN --chat-id -100GRUBID --thread-id 12345 --timeframe 1h
+
+  # Çoklu timeframe — her biri farklı forum konusuna (multiprocessing):
+  python bot.py --token BOT_TOKEN --multi \\
+      --tf 1H:-100GRUBID:11111 \\
+      --tf 4H:-100GRUBID:22222 \\
+      --tf 8H:-100GRUBID:33333 \\
+      --tf 12H:-100GRUBID:44444 \\
+      --tf 1D:-100GRUBID:55555
+
+  # Forum konusuz (eski davranış, THREAD_ID opsiyonel):
   python bot.py --token BOT_TOKEN --multi \\
       --tf 1H:-100111 \\
-      --tf 4H:-100222 \\
-      --tf 8H:-100333 \\
-      --tf 12H:-100444 \\
-      --tf 1D:-100555
+      --tf 4H:-100222
         """
     )
     parser.add_argument(
@@ -1079,7 +1105,11 @@ def main():
     )
     parser.add_argument(
         "--chat-id", type=str, default=TELEGRAM_CHAT_ID,
-        help="Telegram chat ID (tek timeframe modunda kullanılır)"
+        help="Telegram grup chat ID — örnek: -1001234567890"
+    )
+    parser.add_argument(
+        "--thread-id", type=str, default=TELEGRAM_THREAD_ID,
+        help="Telegram forum konu (topic) ID — alt konuya göndermek için (tek timeframe modunda)"
     )
     parser.add_argument(
         "--timeframe", type=str, default=ACTIVE_TIMEFRAME,
@@ -1091,8 +1121,11 @@ def main():
         help="Çoklu timeframe modu — tüm --tf çiftleri paralel process olarak başlatılır"
     )
     parser.add_argument(
-        "--tf", action="append", metavar="TIMEFRAME:CHAT_ID",
-        help="Timeframe:ChatID çifti. Örnek: --tf 1H:-100111 --tf 4H:-100222"
+        "--tf", action="append", metavar="TIMEFRAME:CHAT_ID[:THREAD_ID]",
+        help=(
+            "Timeframe:ChatID veya Timeframe:ChatID:ThreadID çifti/üçlüsü. "
+            "Örnek: --tf 1H:-100GRUBID:12345 --tf 4H:-100GRUBID:67890"
+        )
     )
     parser.add_argument(
         "--api-key", type=str, default=BINANCE_API_KEY,
@@ -1117,8 +1150,8 @@ def main():
     if args.multi:
         # ─── Çoklu timeframe modu ───
         if not args.tf:
-            print("HATA: --multi modunda en az bir --tf TIMEFRAME:CHAT_ID çifti gereklidir.")
-            print("Örnek: --tf 1H:-100111 --tf 4H:-100222")
+            print("HATA: --multi modunda en az bir --tf TIMEFRAME:CHAT_ID[:THREAD_ID] çifti gereklidir.")
+            print("Örnek: --tf 1H:-100GRUBID:12345 --tf 4H:-100GRUBID:67890")
             sys.exit(1)
 
         # Ana process loglama (genel bilgiler için)
@@ -1126,20 +1159,27 @@ def main():
         log.info("Çoklu timeframe modu başlatılıyor: %d timeframe", len(args.tf))
 
         processler = []
-        for tf_chat in args.tf:
-            if ":" not in tf_chat:
-                print(f"HATA: Geçersiz --tf formatı: '{tf_chat}'. Beklenen: TIMEFRAME:CHAT_ID")
+        for tf_deger in args.tf:
+            parcalar = tf_deger.split(":")
+            # Desteklenen formatlar:
+            #   TIMEFRAME:CHAT_ID            → parcalar = [tf, chat_id]
+            #   TIMEFRAME:CHAT_ID:THREAD_ID  → parcalar = [tf, chat_id, thread_id]
+            # Not: chat_id negatif olabilir (-100xxx), bu yüzden ":" ayracı en fazla 2 kez bölünür
+            if len(parcalar) < 2:
+                print(f"HATA: Geçersiz --tf formatı: '{tf_deger}'. Beklenen: TIMEFRAME:CHAT_ID[:THREAD_ID]")
                 sys.exit(1)
-            timeframe, chat_id = tf_chat.split(":", 1)
-            timeframe = timeframe.upper()
+            timeframe = parcalar[0].upper()
+            chat_id = parcalar[1]
+            thread_id = parcalar[2] if len(parcalar) >= 3 else ""
             p = multiprocessing.Process(
                 target=process_calistir,
-                args=(token, chat_id, timeframe, api_key, api_secret),
+                args=(token, chat_id, timeframe, api_key, api_secret, thread_id),
                 name=f"Bot-{timeframe}"
             )
             processler.append(p)
             p.start()
-            log.info("Process başlatıldı: %s (PID: %d)", p.name, p.pid)
+            log.info("Process başlatıldı: %s (PID: %d)%s",
+                     p.name, p.pid, f" → Konu ID: {thread_id}" if thread_id else "")
 
         # Tüm process'lerin bitmesini bekle
         try:
@@ -1156,6 +1196,7 @@ def main():
         # ─── Tek timeframe modu (eski davranış) ───
         chat_id = args.chat_id
         timeframe = args.timeframe
+        thread_id = args.thread_id
 
         if not chat_id:
             print("HATA: Telegram chat ID gereklidir. --chat-id parametresi ile belirtin.")
@@ -1169,10 +1210,12 @@ def main():
 
         # Loglama kur
         loglama_kur(timeframe)
-        log.info("Bot başlatılıyor: Timeframe=%s, Chat ID=%s", timeframe.upper(), chat_id)
+        log.info("Bot başlatılıyor: Timeframe=%s, Chat ID=%s%s",
+                 timeframe.upper(), chat_id,
+                 f", Konu ID={thread_id}" if thread_id else "")
 
         try:
-            asyncio.run(ana_dongu(token, chat_id, timeframe))
+            asyncio.run(ana_dongu(token, chat_id, timeframe, thread_id=thread_id))
         except KeyboardInterrupt:
             log.info("Bot kapatıldı.")
 
