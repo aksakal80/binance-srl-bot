@@ -1230,11 +1230,11 @@ def main():
 
         processler = []
         for tf_deger in tf_listesi:
-            parcalar = tf_deger.split(":")
+            parcalar = tf_deger.split(":", 2)
             # Desteklenen formatlar:
             #   TIMEFRAME:CHAT_ID            → parcalar = [tf, chat_id]
             #   TIMEFRAME:CHAT_ID:THREAD_ID  → parcalar = [tf, chat_id, thread_id]
-            # Not: chat_id negatif olabilir (-100xxx), bu yüzden ":" ayracı en fazla 2 kez bölünür
+            # split(":", 2) → en fazla 3 parçaya böler; THREAD_ID içinde ":" olsa sorun olmaz
             if len(parcalar) < 2:
                 print(f"HATA: Geçersiz --tf formatı: '{tf_deger}'. Beklenen: TIMEFRAME:CHAT_ID[:THREAD_ID]")
                 sys.exit(1)
