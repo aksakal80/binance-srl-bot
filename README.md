@@ -53,7 +53,18 @@ Dosyanın başındaki şu satırları bulun ve kendi bilgilerinizi girin:
 # ─── Telegram ───
 TELEGRAM_TOKEN     = ""   # ← BotFather'dan aldığınız token (örn: "123456:ABC-DEF...")
 TELEGRAM_CHAT_ID   = ""   # ← Grubun ID'si (örn: "-1001234567890")
-TELEGRAM_THREAD_ID = ""   # ← Forum alt konu ID (yoksa boş bırakın)
+TELEGRAM_THREAD_ID = ""   # ← Tek timeframe modunda forum alt konu ID (yoksa boş bırakın)
+
+# ─── Çoklu Timeframe Yapılandırması ───
+# Her satır: ("TIMEFRAME", "CHAT_ID", "THREAD_ID")
+# THREAD_ID = web.telegram.org'da alt konuyu açıp adres çubuğundaki son sayıdır
+TIMEFRAME_CONFIGS = [
+    # ("1H",  "-1003880760948", "2"),    # ← # işaretini kaldırarak aktif edin
+    # ("4H",  "-1003880760948", "4"),
+    # ("8H",  "-1003880760948", "7"),
+    # ("12H", "-1003880760948", "13"),
+    # ("1D",  "-1003880760948", "9"),
+]
 
 # ─── Binance API ───
 BINANCE_API_KEY    = ""   # ← Binance API anahtarınız (opsiyonel, boş bırakılabilir)
@@ -66,21 +77,28 @@ BINANCE_API_SECRET = ""   # ← Binance gizli anahtarınız (opsiyonel, boş bı
 TELEGRAM_TOKEN     = "8576023339:AAFoHQ5YfN..."
 TELEGRAM_CHAT_ID   = "-1003880760948"
 TELEGRAM_THREAD_ID = ""
+
+TIMEFRAME_CONFIGS = [
+    ("1H",  "-1003880760948", "2"),
+    ("4H",  "-1003880760948", "4"),
+    ("8H",  "-1003880760948", "7"),
+    ("12H", "-1003880760948", "13"),
+    ("1D",  "-1003880760948", "9"),
+]
+
 BINANCE_API_KEY    = "nCNQe7GcuSq..."
 BINANCE_API_SECRET = "rwBWrQybI6Tl..."
 ```
 
-Kaydedin ve botu başlatın:
+Kaydedin ve botu başlatın — komut satırında başka argüman gerekmez:
 
 ```bash
-# 5 timeframe — her biri kendi forum alt konusuna
-python bot.py --multi \
-    --tf 1H:-1003880760948:2 \
-    --tf 4H:-1003880760948:4 \
-    --tf 8H:-1003880760948:7 \
-    --tf 12H:-1003880760948:13 \
-    --tf 1D:-1003880760948:9
+# 5 timeframe — her biri kendi forum alt konusuna (TIMEFRAME_CONFIGS kullanılır)
+python bot.py --multi
 ```
+
+> **Thread ID nasıl bulunur?** [web.telegram.org](https://web.telegram.org) adresini açın, grubunuzdaki ilgili alt konuya tıklayın.
+> Adres çubuğunda: `https://web.telegram.org/k/#-1001234567890_12345` → son sayı (`12345`) Thread ID'dir.
 
 ---
 

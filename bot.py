@@ -34,7 +34,23 @@ import matplotlib.patches as mpatches
 # ─── Telegram ───
 TELEGRAM_TOKEN     = ""   # ← BotFather'dan aldığınız token (örn: "123456:ABC-DEF...")
 TELEGRAM_CHAT_ID   = ""   # ← Grubun ID'si (örn: "-1001234567890")
-TELEGRAM_THREAD_ID = ""   # ← Forum alt konu ID (yoksa boş bırakın)
+TELEGRAM_THREAD_ID = ""   # ← Forum alt konu ID — tek timeframe modunda (yoksa boş bırakın)
+
+# ─── Çoklu Timeframe Yapılandırması ───────────────────────────────────────────
+# python bot.py --multi  komutuyla çalıştırıldığında bu liste kullanılır.
+# Her satır: ("TIMEFRAME", "CHAT_ID", "THREAD_ID")
+#   CHAT_ID   → Telegram grubunuzun ID'si (hepsinde aynı olabilir)
+#   THREAD_ID → Her alt konunun (topic) ID'si — nasıl bulunur: web.telegram.org'da
+#               ilgili alt konuyu açın, adres çubuğundaki son sayıdır (örn: _12345)
+#               Forum grubu değilse THREAD_ID'yi "" (boş) bırakın.
+# Satır başındaki # işaretini kaldırarak aktif edin:
+TIMEFRAME_CONFIGS = [
+    # ("1H",  "-1003880760948", "2"),    # ← THREAD_ID = alt konunun ID'si
+    # ("4H",  "-1003880760948", "4"),
+    # ("8H",  "-1003880760948", "7"),
+    # ("12H", "-1003880760948", "13"),
+    # ("1D",  "-1003880760948", "9"),
+]
 
 # ─── Timeframe ───
 ACTIVE_TIMEFRAME  = "1h"        # --timeframe ile override edilir
@@ -710,6 +726,29 @@ def grafik_olustur(sinyal: dict) -> str | None:
 # BÖLÜM E — TELEGRAM GÖNDERİCİ
 # ═══════════════════════════════════════════════
 
+TELEGRAM_MAX_MESAJ_LEN = 4096  # Telegram API mesaj karakter sınırı
+
+
+def _mesaj_bolum(metin: str, maks: int = TELEGRAM_MAX_MESAJ_LEN) -> list[str]:
+    """Uzun bir mesajı satır kırma noktalarından bölüp parçalar hâlinde döndürür.
+    Her parça en fazla 'maks' karakter uzunluğundadır."""
+    satirlar = metin.split("\n")
+    parcalar: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for satir in satirlar:
+        satir_len = len(satir) + 1  # +1 → \n
+        if current_len + satir_len > maks and current:
+            parcalar.append("\n".join(current))
+            current = [satir]
+            current_len = satir_len
+        else:
+            current.append(satir)
+            current_len += satir_len
+    if current:
+        parcalar.append("\n".join(current))
+    return parcalar
+
 def _yildiz_goster(skor: int, maks: int = 5) -> str:
     """Güven skorunu yıldız sembollerine çevirir."""
     return "★" * skor + "☆" * (maks - skor)
@@ -872,7 +911,19 @@ def best20_mesaji_olustur(sinyaller: list[dict], tur: str, timeframe: str) -> st
 
 async def telegram_mesaj_gonder(token: str, chat_id: str, metin: str, thread_id: str = "") -> bool:
     """Telegram'a metin mesajı gönderir.
+    4096 karakter sınırı aşılırsa mesaj otomatik olarak parçalara bölünür.
     thread_id verilirse mesaj ilgili forum konusuna (alt konuya) gönderilir."""
+    # Uzun mesajları parçala
+    if len(metin) > TELEGRAM_MAX_MESAJ_LEN:
+        parcalar = _mesaj_bolum(metin)
+        basarili = True
+        for parca in parcalar:
+            if parca.strip():
+                ok = await telegram_mesaj_gonder(token, chat_id, parca, thread_id=thread_id)
+                if not ok:
+                    basarili = False
+        return basarili
+
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {
         "chat_id": chat_id,
@@ -886,7 +937,15 @@ async def telegram_mesaj_gonder(token: str, chat_id: str, metin: str, thread_id:
             log.warning("Geçersiz thread_id değeri '%s', forum konusu olmadan gönderiliyor.", thread_id)
     try:
         resp = requests.post(url, json=payload, timeout=30)
-        resp.raise_for_status()
+        if not resp.ok:
+            log.warning(
+                "Telegram mesaj hatası (Markdown): status=%s, yanıt=%s — düz metin ile tekrar deneniyor.",
+                resp.status_code, resp.text[:200]
+            )
+            # Markdown parse hatası olabilir — parse_mode olmadan tekrar dene
+            payload.pop("parse_mode", None)
+            resp2 = requests.post(url, json=payload, timeout=30)
+            resp2.raise_for_status()
         return True
     except Exception as e:
         log.error("Telegram mesaj gönderme hatası: %s", e)
@@ -1152,17 +1211,25 @@ def main():
 
     if args.multi:
         # ─── Çoklu timeframe modu ───
-        if not args.tf:
-            print("HATA: --multi modunda en az bir --tf TIMEFRAME:CHAT_ID[:THREAD_ID] çifti gereklidir.")
-            print("Örnek: --tf 1H:-100GRUBID:12345 --tf 4H:-100GRUBID:67890")
-            sys.exit(1)
+        # --tf argümanı yoksa bot.py içindeki TIMEFRAME_CONFIGS listesini kullan
+        tf_listesi = args.tf
+        if not tf_listesi:
+            if not TIMEFRAME_CONFIGS:
+                print("HATA: --multi modunda ya --tf argümanı ya da bot.py içindeki TIMEFRAME_CONFIGS listesi dolu olmalıdır.")
+                print("bot.py dosyasını açıp TIMEFRAME_CONFIGS listesindeki satır başı # işaretlerini kaldırın.")
+                sys.exit(1)
+            # TIMEFRAME_CONFIGS'ten ("1H", "-100xxx", "12345") → "1H:-100xxx:12345" formatına çevir
+            tf_listesi = [
+                f"{tf}:{cid}:{tid}" if tid else f"{tf}:{cid}"
+                for tf, cid, tid in TIMEFRAME_CONFIGS
+            ]
 
         # Ana process loglama (genel bilgiler için)
         loglama_kur("MULTI")
-        log.info("Çoklu timeframe modu başlatılıyor: %d timeframe", len(args.tf))
+        log.info("Çoklu timeframe modu başlatılıyor: %d timeframe", len(tf_listesi))
 
         processler = []
-        for tf_deger in args.tf:
+        for tf_deger in tf_listesi:
             parcalar = tf_deger.split(":")
             # Desteklenen formatlar:
             #   TIMEFRAME:CHAT_ID            → parcalar = [tf, chat_id]
