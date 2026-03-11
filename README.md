@@ -9,9 +9,8 @@ Binance USDT spot paritelerini tarayarak destek ve direnç seviyelerine yaklaşa
 - **Tam Sembol Taraması** — Son 24 saatte hacmi 500.000 USDT üzerinde olan TÜM Binance USDT paritelerini tarar (200–300 coin)
 - **Swing High/Low Analizi** — Fiyat tabanlı önemli dönüm noktaları tespit edilir
 - **Cluster Kümeleme** — Yakın seviyeleri birleştirerek güçlü bölgeler belirlenir
-- **Volume Profile** — Yüksek hacim yoğunluğu olan fiyat bölgeleri belirlenir
-- **Zone Sınıflandırması** — Her seviye Zone 1 ★★★ / Zone 2 ★★ / Zone 3 ⚠️ olarak sınıflandırılır
-- **5/5 Güven Skoru** — RSI, Volume Spike, Williams %R, EMA Trend, Zone 1 bonusu
+- **Dokunuş Bazlı Zone** — Zone 1 ★★★ ≥3 dokunuş, Zone 2 ★★ = 2 dokunuş, Zone 3 ★ = 1 dokunuş
+- **4/4 Güven Skoru** — RSI (45/55 eşiği), Volume Spike, EMA Trend, Zone 1 (dokunuş sayısı bazlı)
 - **3 Panelli Grafik** — Mum (EMA dahil) + RSI (40/60 çizgileri) + Volume
 - **Best 20 Listesi** — En güçlü 20 Destek ve 20 Direnç sinyali ayrı ayrı gönderilir
 - **Çoklu Timeframe (Multiprocessing)** — Tek komutla 5 timeframe paralel çalıştırma desteği
@@ -237,17 +236,16 @@ python bot.py --token BOT_TOKEN --multi \
 | `SCAN_INTERVAL_SEC` | `900` | Tarama aralığı (saniye, varsayılan 15 dakika) |
 | `NEAR_PCT` | `1.0` | YAKIN sinyal eşiği (%) |
 | `APPROACH_PCT` | `3.0` | YAKLAŞIYOR sinyal eşiği (%) |
-| `MIN_CONFIDENCE` | `2` | Gönderilecek minimum güven skoru |
+| `MIN_CONFIDENCE` | `3` | Gönderilecek minimum güven skoru |
 | `RSI_PERIOD` | `14` | RSI hesaplama periyodu |
-| `RSI_SUPPORT_MAX` | `40` | Destek için RSI onay eşiği (RSI < 40) |
-| `RSI_RESIST_MIN` | `60` | Direnç için RSI onay eşiği (RSI > 60) |
+| `RSI_SUPPORT_MAX` | `45` | Destek için RSI onay eşiği (RSI < 45) |
+| `RSI_RESIST_MIN` | `55` | Direnç için RSI onay eşiği (RSI > 55) |
 | `VOL_SPIKE_MULT` | `1.5` | Volume Spike çarpanı (son hacim > ort × 1.5) |
 | `VOL_LOOKBACK` | `20` | Volume Spike için geriye bakış periyodu |
-| `WR_PERIOD` | `10` | Williams %R periyodu |
 | `EMA_SHORT` | `20` | Kısa EMA periyodu |
 | `EMA_LONG` | `50` | Uzun EMA periyodu |
-| `SWING_WINDOW` | `2` | Swing High/Low penceresi |
-| `CLUSTER_TOL_PCT` | `0.3` | Kümeleme toleransı (%) |
+| `SWING_WINDOW` | `5` | Swing High/Low penceresi |
+| `CLUSTER_TOL_PCT` | `0.8` | Kümeleme toleransı (%) |
 | `MIN_VOLUME_USDT` | `500_000` | Minimum 24s hacim filtresi (USDT) |
 | `BEST_N` | `20` | Best N listesi boyutu |
 | `CHART_CANDLES` | `80` | Grafikte gösterilecek son mum sayısı |
@@ -278,9 +276,8 @@ python bot.py --token BOT_TOKEN --multi \
 ━━━━━━━━━━━━━━━━━━━━━━━
 📉 RSI (14): 37.4  🔥 Güçlü
 📈 Volume Spike: ✅ VAR (×2.31 ort.)
-📊 Williams %R: -82.5  ✅ Onaylandı
 📈 EMA Trend: ✅ Uyumlu
-⭐ Güven Skoru: 5/5  ★★★★★
+⭐ Güven: 4/4  ★★★★
 ━━━━━━━━━━━━━━━━━━━━━━━
 _Binance SRL Bot · v3.0_
 ```
@@ -288,18 +285,13 @@ _Binance SRL Bot · v3.0_
 ### Best 20 Listesi
 
 ```
-🟢 BEST 20 DESTEK — 1H — En Yakın Destek Seviyeleri
-🕐 10.03.2026 · 14:00 UTC
-────────────────────────────
-
-🥇 #1  BTCUSDT · 1H
-   🟢 DESTEK YAKIN · Zone 1 ★★★ · %0.72
-   Seviye: 64960.00  RSI: 37.4  ✅
-   Vol Spike: ✅ ×2.31 · W%R: -82.5 ✅ · EMA: ✅
-   ⭐ Güven: 5/5  ★★★★★
+🟢 TOP 20 DESTEK · 1H · 10.03 14:00 UTC
+────────────────────────
+ 1. *BTCUSDT*  %0.72 ★★★ ★★★★ ⚡×2.3
+ 2. *ETHUSDT*  %1.1 ★★★ ★★★☆
 ...
-────────────────────────────
-_Binance SRL Bot · v3.0_
+────────────────────────
+_Binance SRL Bot_
 ```
 
 ---
@@ -338,11 +330,10 @@ _Binance SRL Bot · v3.0_
 ### Güven Skoru (Maks 5/5)
 | Kriter | Destek | Direnç | Puan |
 |--------|--------|--------|------|
-| RSI | RSI < 40 | RSI > 60 | +1 |
+| RSI | RSI < 45 | RSI > 55 | +1 |
 | Volume Spike | Hacim > ort × 1.5 | Hacim > ort × 1.5 | +1 |
-| Williams %R | W%R < -80 | W%R > -20 | +1 |
-| EMA Trend | Fiyat > EMA50 | Fiyat < EMA50 | +1 |
-| Zone 1 Bonusu | Seviye Zone 1 ise | Seviye Zone 1 ise | +1 |
+| EMA Trend | Fiyat > EMA20 | Fiyat < EMA20 | +1 |
+| Zone 1 | Seviye 3+ dokunuş | Seviye 3+ dokunuş | +1 |
 
 ### Gönderim Sırası (Her 15 Dakika)
 1. 🟢 Bireysel destek sinyalleri (grafik ile, güven yüksekten düşüğe)
@@ -448,17 +439,16 @@ python bot.py --token TOKEN --chat-id CHAT_ID --timeframe 1w
 | `SCAN_INTERVAL_SEC` | `900` | Tarama aralığı (saniye, varsayılan 15 dakika) |
 | `NEAR_PCT` | `1.0` | YAKIN sinyal eşiği (%) |
 | `APPROACH_PCT` | `3.0` | YAKLAŞIYOR sinyal eşiği (%) |
-| `MIN_CONFIDENCE` | `2` | Gönderilecek minimum güven skoru |
+| `MIN_CONFIDENCE` | `3` | Gönderilecek minimum güven skoru |
 | `RSI_PERIOD` | `14` | RSI hesaplama periyodu |
-| `RSI_SUPPORT_MAX` | `40` | Destek için RSI onay eşiği (RSI < 40) |
-| `RSI_RESIST_MIN` | `60` | Direnç için RSI onay eşiği (RSI > 60) |
+| `RSI_SUPPORT_MAX` | `45` | Destek için RSI onay eşiği (RSI < 45) |
+| `RSI_RESIST_MIN` | `55` | Direnç için RSI onay eşiği (RSI > 55) |
 | `VOL_SPIKE_MULT` | `1.5` | Volume Spike çarpanı (son hacim > ort × 1.5) |
 | `VOL_LOOKBACK` | `20` | Volume Spike için geriye bakış periyodu |
-| `WR_PERIOD` | `10` | Williams %R periyodu |
 | `EMA_SHORT` | `20` | Kısa EMA periyodu |
 | `EMA_LONG` | `50` | Uzun EMA periyodu |
-| `SWING_WINDOW` | `2` | Swing High/Low penceresi |
-| `CLUSTER_TOL_PCT` | `0.3` | Kümeleme toleransı (%) |
+| `SWING_WINDOW` | `5` | Swing High/Low penceresi |
+| `CLUSTER_TOL_PCT` | `0.8` | Kümeleme toleransı (%) |
 | `MIN_VOLUME_USDT` | `500_000` | Minimum 24s hacim filtresi (USDT) |
 | `BEST_N` | `20` | Best N listesi boyutu |
 | `CHART_CANDLES` | `80` | Grafikte gösterilecek son mum sayısı |
@@ -489,9 +479,8 @@ python bot.py --token TOKEN --chat-id CHAT_ID --timeframe 1w
 ━━━━━━━━━━━━━━━━━━━━━━━
 📉 RSI (14): 37.4  🔥 Güçlü
 📈 Volume Spike: ✅ VAR (×2.31 ort.)
-📊 Williams %R: -82.5  ✅ Onaylandı
 📈 EMA Trend: ✅ Uyumlu
-⭐ Güven Skoru: 5/5  ★★★★★
+⭐ Güven: 4/4  ★★★★
 ━━━━━━━━━━━━━━━━━━━━━━━
 _Binance SRL Bot · v3.0_
 ```
@@ -499,18 +488,13 @@ _Binance SRL Bot · v3.0_
 ### Best 20 Listesi
 
 ```
-🟢 BEST 20 DESTEK — 1H — En Yakın Destek Seviyeleri
-🕐 10.03.2026 · 14:00 UTC
-────────────────────────────
-
-🥇 #1  BTCUSDT · 1H
-   🟢 DESTEK YAKIN · Zone 1 ★★★ · %0.72
-   Seviye: 64960.00  RSI: 37.4  ✅
-   Vol Spike: ✅ ×2.31 · W%R: -82.5 ✅ · EMA: ✅
-   ⭐ Güven: 5/5  ★★★★★
+🟢 TOP 20 DESTEK · 1H · 10.03 14:00 UTC
+────────────────────────
+ 1. *BTCUSDT*  %0.72 ★★★ ★★★★ ⚡×2.3
+ 2. *ETHUSDT*  %1.1 ★★★ ★★★☆
 ...
-────────────────────────────
-_Binance SRL Bot · v3.0_
+────────────────────────
+_Binance SRL Bot_
 ```
 
 ---
@@ -549,11 +533,10 @@ _Binance SRL Bot · v3.0_
 ### Güven Skoru (Maks 5/5)
 | Kriter | Destek | Direnç | Puan |
 |--------|--------|--------|------|
-| RSI | RSI < 40 | RSI > 60 | +1 |
+| RSI | RSI < 45 | RSI > 55 | +1 |
 | Volume Spike | Hacim > ort × 1.5 | Hacim > ort × 1.5 | +1 |
-| Williams %R | W%R < -80 | W%R > -20 | +1 |
-| EMA Trend | Fiyat > EMA50 | Fiyat < EMA50 | +1 |
-| Zone 1 Bonusu | Seviye Zone 1 ise | Seviye Zone 1 ise | +1 |
+| EMA Trend | Fiyat > EMA20 | Fiyat < EMA20 | +1 |
+| Zone 1 | Seviye 3+ dokunuş | Seviye 3+ dokunuş | +1 |
 
 ### Gönderim Sırası (Her 15 Dakika)
 1. 🟢 Bireysel destek sinyalleri (grafik ile, güven yüksekten düşüğe)

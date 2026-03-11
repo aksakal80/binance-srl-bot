@@ -265,12 +265,12 @@ def swing_noktalarini_bul(df: pd.DataFrame, pencere: int = SWING_WINDOW) -> tupl
     swing_lows = []
 
     for i in range(pencere, n - pencere):
-        if all(yuksekler[i] >= yuksekler[i - j] for j in range(1, pencere + 1)) and \
-           all(yuksekler[i] >= yuksekler[i + j] for j in range(1, pencere + 1)):
+        if all(yuksekler[i] > yuksekler[i - j] for j in range(1, pencere + 1)) and \
+           all(yuksekler[i] > yuksekler[i + j] for j in range(1, pencere + 1)):
             swing_highs.append(yuksekler[i])
 
-        if all(dusukler[i] <= dusukler[i - j] for j in range(1, pencere + 1)) and \
-           all(dusukler[i] <= dusukler[i + j] for j in range(1, pencere + 1)):
+        if all(dusukler[i] < dusukler[i - j] for j in range(1, pencere + 1)) and \
+           all(dusukler[i] < dusukler[i + j] for j in range(1, pencere + 1)):
             swing_lows.append(dusukler[i])
 
     return swing_highs, swing_lows
@@ -449,8 +449,6 @@ def sinyal_olustur(sembol: str, df: pd.DataFrame, timeframe: str) -> list[dict]:
             guven += 1
         if zone1_onay:
             guven += 1
-        if zone1_onay and rsi_onay:
-            guven += 1  # bonus: güçlü seviye + RSI onayı
 
         if guven < MIN_CONFIDENCE:
             return None
