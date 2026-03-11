@@ -60,21 +60,21 @@ SCAN_INTERVAL_SEC = 900          # 15 dakika
 # ─── Sinyal Eşikleri ───
 NEAR_PCT          = 1.0          # %1 → YAKIN
 APPROACH_PCT      = 3.0          # %3 → YAKLAŞIYOR
-MIN_CONFIDENCE    = 2            # Minimum güven skoru
+MIN_CONFIDENCE    = 3            # Minimum güven skoru (yükseltildi: daha kaliteli sinyal)
 
 # ─── İndikatör Parametreleri ───
 RSI_PERIOD        = 14
-RSI_SUPPORT_MAX   = 40
-RSI_RESIST_MIN    = 60
+RSI_SUPPORT_MAX   = 45           # Destek: RSI < 45 (biraz genişletildi)
+RSI_RESIST_MIN    = 55           # Direnç: RSI > 55
 VOL_SPIKE_MULT    = 1.5
 VOL_LOOKBACK      = 20
-WR_PERIOD         = 10
 EMA_SHORT         = 20
 EMA_LONG          = 50
 
 # ─── Destek/Direnç ───
-SWING_WINDOW      = 2
-CLUSTER_TOL_PCT   = 0.3
+SWING_WINDOW      = 5            # 5 mum her yanda → daha anlamlı pivot noktaları
+CLUSTER_TOL_PCT   = 0.8          # %0.8 tolerans → seviyeleri düzgün kümeliyor
+TOUCH_TOL_PCT     = 0.5          # %0.5 içine gelen kapanış "dokunuş" sayılır
 MIN_VOLUME_USDT   = 500_000
 
 # ─── Best 20 ───
@@ -241,21 +241,21 @@ def mum_verisi_getir(sembol: str, timeframe: str, limit: int = CANDLE_LIMIT) -> 
 # BÖLÜM B — DESTEK/DİRENÇ HESAPLAYICI
 # ═══════════════════════════════════════════════
 
-def zone_bilgisi(guc_skoru: int) -> tuple[int, str]:
-    """Güç skoruna göre zone numarası ve yıldız sembolü döndürür."""
-    if guc_skoru >= 3:
+def zone_bilgisi(dokunuslar: int) -> tuple[int, str]:
+    """Dokunuş sayısına göre zone numarası ve yıldız döndürür.
+    Zone 1 (güçlü): 3+ dokunuş, Zone 2 (orta): 2 dokunuş, Zone 3 (zayıf): 1 dokunuş"""
+    if dokunuslar >= 3:
         return 1, "★★★"
-    elif guc_skoru == 2:
+    elif dokunuslar == 2:
         return 2, "★★"
     else:
-        return 3, "⚠️"
+        return 3, "★"
 
 
 def swing_noktalarini_bul(df: pd.DataFrame, pencere: int = SWING_WINDOW) -> tuple[list, list]:
     """
     Swing High ve Swing Low noktalarını bulur.
-    High: önceki ve sonraki pencere kadar mumdan yüksek
-    Low: önceki ve sonraki pencere kadar mumdan düşük
+    Her iki yanda 'pencere' kadar mum bakılır; daha sağlam pivotlar elde edilir.
     """
     yuksekler = df["yuksek"].values
     dusukler = df["dusuk"].values
@@ -265,23 +265,37 @@ def swing_noktalarini_bul(df: pd.DataFrame, pencere: int = SWING_WINDOW) -> tupl
     swing_lows = []
 
     for i in range(pencere, n - pencere):
-        # Swing High kontrolü
-        if all(yuksekler[i] > yuksekler[i - j] for j in range(1, pencere + 1)) and \
-           all(yuksekler[i] > yuksekler[i + j] for j in range(1, pencere + 1)):
+        if all(yuksekler[i] >= yuksekler[i - j] for j in range(1, pencere + 1)) and \
+           all(yuksekler[i] >= yuksekler[i + j] for j in range(1, pencere + 1)):
             swing_highs.append(yuksekler[i])
 
-        # Swing Low kontrolü
-        if all(dusukler[i] < dusukler[i - j] for j in range(1, pencere + 1)) and \
-           all(dusukler[i] < dusukler[i + j] for j in range(1, pencere + 1)):
+        if all(dusukler[i] <= dusukler[i - j] for j in range(1, pencere + 1)) and \
+           all(dusukler[i] <= dusukler[i + j] for j in range(1, pencere + 1)):
             swing_lows.append(dusukler[i])
 
     return swing_highs, swing_lows
 
 
+def dokunuslari_say(df: pd.DataFrame, seviye: float, tolerans_pct: float = TOUCH_TOL_PCT) -> int:
+    """Fiyatın belirli bir seviyeye kaç kez yaklaştığını sayar.
+    Her kapanış fiyatı seviyenin tolerans_pct yüzdesi içine girerse 'dokunuş' sayılır."""
+    kapanis = df["kapanis"].values
+    tol = seviye * tolerans_pct / 100
+    dokunuslar = 0
+    onceki_dokundu = False
+    for k in kapanis:
+        if abs(k - seviye) <= tol:
+            if not onceki_dokundu:
+                dokunuslar += 1
+            onceki_dokundu = True
+        else:
+            onceki_dokundu = False
+    return max(1, dokunuslar)
+
+
 def kumeleme_yap(seviyeler: list, tolerans_pct: float = CLUSTER_TOL_PCT) -> list[dict]:
     """
-    Birbirine yakın seviyeleri kümeleyerek ortalama seviye ve güç skoru döndürür.
-    tolerans_pct: yüzde cinsinden kümeleme toleransı
+    Birbirine yakın seviyeleri kümeleyerek ortalama seviye ve küme büyüklüğü döndürür.
     """
     if not seviyeler:
         return []
@@ -295,92 +309,46 @@ def kumeleme_yap(seviyeler: list, tolerans_pct: float = CLUSTER_TOL_PCT) -> list
         if abs(seviye - kume_ort) / kume_ort * 100 <= tolerans_pct:
             mevcut_kume.append(seviye)
         else:
-            kumeler.append({
-                "seviye": float(np.mean(mevcut_kume)),
-                "guc": len(mevcut_kume)
-            })
+            kumeler.append({"seviye": float(np.mean(mevcut_kume)), "kume_byt": len(mevcut_kume)})
             mevcut_kume = [seviye]
 
-    kumeler.append({
-        "seviye": float(np.mean(mevcut_kume)),
-        "guc": len(mevcut_kume)
-    })
-
+    kumeler.append({"seviye": float(np.mean(mevcut_kume)), "kume_byt": len(mevcut_kume)})
     return kumeler
-
-
-def hacim_profili_seviyeleri(df: pd.DataFrame, bolgeler: int = 20) -> list[float]:
-    """
-    Volume Profile: her fiyat bölgesine hacmi dağıtarak yüksek yoğunluklu
-    seviyeleri tespit eder.
-    """
-    toplam_min = df["dusuk"].min()
-    toplam_max = df["yuksek"].max()
-
-    if toplam_max <= toplam_min:
-        return []
-
-    bolge_boyutu = (toplam_max - toplam_min) / bolgeler
-    hacim_dagilimi = np.zeros(bolgeler)
-
-    for _, mum in df.iterrows():
-        mum_aralik = mum["yuksek"] - mum["dusuk"]
-        if mum_aralik <= 0:
-            continue
-        for b in range(bolgeler):
-            bolge_alt = toplam_min + b * bolge_boyutu
-            bolge_ust = bolge_alt + bolge_boyutu
-            # Mumun bu bölgeyle örtüşme oranı
-            ortu = min(mum["yuksek"], bolge_ust) - max(mum["dusuk"], bolge_alt)
-            if ortu > 0:
-                hacim_dagilimi[b] += mum["hacim"] * (ortu / mum_aralik)
-
-    # En yüksek hacim yoğunluğu bölgeleri
-    esik = np.percentile(hacim_dagilimi, 75)
-    yuksek_hacim_seviyeleri = []
-    for b in range(bolgeler):
-        if hacim_dagilimi[b] >= esik:
-            seviye = toplam_min + (b + 0.5) * bolge_boyutu
-            yuksek_hacim_seviyeleri.append(seviye)
-
-    return yuksek_hacim_seviyeleri
 
 
 def destek_direnc_hesapla(df: pd.DataFrame) -> tuple[list[dict], list[dict]]:
     """
-    Swing, Cluster ve Volume Profile kullanarak Destek ve Direnç seviyelerini hesaplar.
-    Her seviye için: seviye fiyatı, güç skoru, zone numarası, zone yıldızı döndürür.
+    Swing pivot noktaları + dokunuş sayısı kullanarak Destek ve Direnç seviyelerini hesaplar.
+    Gate.io stili: anlamlı pivot + dokunuş sayısına göre güç.
     """
     mevcut_fiyat = df["kapanis"].iloc[-1]
 
-    # Swing noktaları
     swing_highs, swing_lows = swing_noktalarini_bul(df)
 
-    # Volume Profile seviyeleri
-    hacim_seviyeleri = hacim_profili_seviyeleri(df)
-
-    # Kümeleme: Dirençler (yüksekler) ve Hacim seviyelerindeki yüksekler
+    # Kümeleme
     direnc_ham = [s for s in swing_highs if s > mevcut_fiyat]
-    direnc_ham += [s for s in hacim_seviyeleri if s > mevcut_fiyat]
-    direnc_kumeleri = kumeleme_yap(direnc_ham)
-
-    # Kümeleme: Destekler (düşükler) ve Hacim seviyelerindeki düşükler
     destek_ham = [s for s in swing_lows if s < mevcut_fiyat]
-    destek_ham += [s for s in hacim_seviyeleri if s < mevcut_fiyat]
+
+    direnc_kumeleri = kumeleme_yap(direnc_ham)
     destek_kumeleri = kumeleme_yap(destek_ham)
 
-    # Zone bilgisi ekle
     def zone_ekle(kumeler: list[dict]) -> list[dict]:
+        sonuc = []
         for k in kumeler:
-            zone_no, zone_yildiz = zone_bilgisi(k["guc"])
-            k["zone_no"] = zone_no
-            k["zone_yildiz"] = zone_yildiz
-        return kumeler
+            dokunusu = dokunuslari_say(df, k["seviye"])
+            zone_no, zone_yildiz = zone_bilgisi(dokunusu)
+            sonuc.append({
+                "seviye": k["seviye"],
+                "guc": dokunusu,
+                "zone_no": zone_no,
+                "zone_yildiz": zone_yildiz,
+            })
+        return sonuc
 
     destekler = zone_ekle(destek_kumeleri)
     direncleri = zone_ekle(direnc_kumeleri)
 
-    # Destekleri fiyata mesafeye göre sırala (en yakın önce)
+    # En yakın seviyeler önce
     destekler.sort(key=lambda x: abs(mevcut_fiyat - x["seviye"]))
     direncleri.sort(key=lambda x: abs(mevcut_fiyat - x["seviye"]))
 
@@ -404,29 +372,13 @@ def rsi_hesapla(df: pd.DataFrame, periyot: int = RSI_PERIOD) -> float:
     return float(rsi.iloc[-1])
 
 
-def williams_r_hesapla(df: pd.DataFrame, periyot: int = WR_PERIOD) -> float:
-    """Son mumun Williams %R değerini hesaplar."""
-    son_n = df.tail(periyot)
-    en_yuksek = son_n["yuksek"].max()
-    en_dusuk = son_n["dusuk"].min()
-    kapanis = df["kapanis"].iloc[-1]
-    if en_yuksek == en_dusuk:
-        return -50.0
-    wr = (en_yuksek - kapanis) / (en_yuksek - en_dusuk) * -100
-    return float(wr)
-
-
 def ema_hesapla(df: pd.DataFrame, periyot: int) -> float:
     """Son mumun EMA değerini hesaplar."""
     return float(df["kapanis"].ewm(span=periyot, adjust=False).mean().iloc[-1])
 
 
 def hacim_spike_hesapla(df: pd.DataFrame) -> tuple[bool, float]:
-    """
-    Volume Spike kontrolü.
-    Son mum hacmi, son VOL_LOOKBACK mumun ortalamasının VOL_SPIKE_MULT katından
-    yüksekse True ve oran döndürür.
-    """
+    """Volume Spike kontrolü — son hacim ortalamadan VOL_SPIKE_MULT kat fazlaysa True."""
     son_hacim = df["hacim"].iloc[-1]
     ort_hacim = df["hacim"].iloc[-(VOL_LOOKBACK + 1):-1].mean()
     if ort_hacim <= 0:
@@ -441,13 +393,13 @@ def sinyal_olustur(sembol: str, df: pd.DataFrame, timeframe: str) -> list[dict]:
     yakın olanlar için sinyal üretir.
 
     Güven Skoru (maks 5/5):
-    +1 RSI onayı (destek: RSI<40, direnç: RSI>60)
+    +1 RSI onayı (destek: RSI<45, direnç: RSI>55)
     +1 Volume Spike
-    +1 Williams %R onayı (destek: <-80, direnç: >-20)
-    +1 EMA Trend uyumu (destek: fiyat > EMA50, direnç: fiyat < EMA50)
-    +1 Zone 1 seviyesi
+    +1 EMA Trend uyumu (destek: fiyat > EMA20, direnç: fiyat < EMA20)
+    +1 Zone 1 seviyesi (3+ dokunuş)
+    +1 Zone 1 ve RSI ikisi birden onay
     """
-    if df is None or len(df) < RSI_PERIOD + 5:
+    if df is None or len(df) < RSI_PERIOD + SWING_WINDOW + 5:
         return []
 
     mevcut_fiyat = df["kapanis"].iloc[-1]
@@ -455,7 +407,6 @@ def sinyal_olustur(sembol: str, df: pd.DataFrame, timeframe: str) -> list[dict]:
 
     # İndikatörler
     rsi = rsi_hesapla(df)
-    wr = williams_r_hesapla(df)
     vol_spike, vol_oran = hacim_spike_hesapla(df)
     ema_kisa = ema_hesapla(df, EMA_SHORT)
     ema_uzun = ema_hesapla(df, EMA_LONG)
@@ -471,15 +422,11 @@ def sinyal_olustur(sembol: str, df: pd.DataFrame, timeframe: str) -> list[dict]:
         if mesafe_pct > APPROACH_PCT:
             return None
 
-        if mesafe_pct <= NEAR_PCT:
-            yakinlik = "YAKIN"
-        else:
-            yakinlik = "YAKLAŞIYOR"
+        yakinlik = "YAKIN" if mesafe_pct <= NEAR_PCT else "YAKLAŞIYOR"
 
-        # Güven skoru hesapla
+        # Güven skoru
         guven = 0
         rsi_onay = False
-        wr_onay = False
         ema_onay = False
         zone1_onay = seviye_dict["zone_no"] == 1
 
@@ -487,20 +434,14 @@ def sinyal_olustur(sembol: str, df: pd.DataFrame, timeframe: str) -> list[dict]:
             if rsi < RSI_SUPPORT_MAX:
                 guven += 1
                 rsi_onay = True
-            if wr < -80:
-                guven += 1
-                wr_onay = True
-            if mevcut_fiyat > ema_uzun:
+            if mevcut_fiyat > ema_kisa:
                 guven += 1
                 ema_onay = True
         else:  # DİRENÇ
             if rsi > RSI_RESIST_MIN:
                 guven += 1
                 rsi_onay = True
-            if wr > -20:
-                guven += 1
-                wr_onay = True
-            if mevcut_fiyat < ema_uzun:
+            if mevcut_fiyat < ema_kisa:
                 guven += 1
                 ema_onay = True
 
@@ -508,6 +449,8 @@ def sinyal_olustur(sembol: str, df: pd.DataFrame, timeframe: str) -> list[dict]:
             guven += 1
         if zone1_onay:
             guven += 1
+        if zone1_onay and rsi_onay:
+            guven += 1  # bonus: güçlü seviye + RSI onayı
 
         if guven < MIN_CONFIDENCE:
             return None
@@ -526,8 +469,6 @@ def sinyal_olustur(sembol: str, df: pd.DataFrame, timeframe: str) -> list[dict]:
             "guven": guven,
             "rsi": round(rsi, 1),
             "rsi_onay": rsi_onay,
-            "wr": round(wr, 1),
-            "wr_onay": wr_onay,
             "vol_spike": vol_spike,
             "vol_oran": vol_oran,
             "ema_onay": ema_onay,
@@ -539,19 +480,17 @@ def sinyal_olustur(sembol: str, df: pd.DataFrame, timeframe: str) -> list[dict]:
             "df": df,
         }
 
-    # Destek sinyalleri
     for sev in destekler[:5]:
         sinyal = sinyal_olustur_ic(sev, "DESTEK")
         if sinyal:
             sinyaller.append(sinyal)
 
-    # Direnç sinyalleri
     for sev in direncleri[:5]:
         sinyal = sinyal_olustur_ic(sev, "DİRENÇ")
         if sinyal:
             sinyaller.append(sinyal)
 
-    # En güçlü sinyali seç (en düşük zone, sonra en yakın mesafe)
+    # En güçlü sinyali döndür (en düşük zone → en yakın mesafe)
     if sinyaller:
         sinyaller.sort(key=lambda x: (x["zone_no"], x["mesafe_pct"]))
         return [sinyaller[0]]
@@ -667,7 +606,7 @@ def grafik_olustur(sinyal: dict) -> str | None:
         ax_mum.legend(loc="upper left", framealpha=0.3, fontsize=8,
                       labelcolor="white", facecolor=CHART_BG_COLOR)
         ax_mum.set_title(
-            f"{sembol} · {timeframe.upper()} · {tur} · GÜVEN: {guven}/5",
+            f"{sembol} · {timeframe.upper()} · {tur} · Zone {sinyal['zone_no']} {sinyal['zone_yildiz']} · Güven {guven}/5",
             color="white", fontsize=11, fontweight="bold", pad=8
         )
 
@@ -755,46 +694,14 @@ def _yildiz_goster(skor: int, maks: int = 5) -> str:
 
 
 def sinyal_mesaji_olustur(sinyal: dict) -> str:
-    """Prompt v3.0 formatına göre bireysel sinyal mesajı oluşturur."""
+    """Gate.io stili, sade bireysel sinyal mesajı oluşturur."""
     s = sinyal
     emoji = "🟢" if s["tur"] == "DESTEK" else "🔴"
-    tur_str = s["tur"]
     zaman: datetime = s["zaman"]
     if hasattr(zaman, "to_pydatetime"):
         zaman = zaman.to_pydatetime()
-    tarih_str = zaman.strftime("%d.%m.%Y")
-    saat_str = zaman.strftime("%H:%M")
+    saat_str = zaman.strftime("%d.%m %H:%M")
 
-    # RSI gösterimi
-    rsi_val = s["rsi"]
-    if s["tur"] == "DESTEK":
-        if rsi_val < 30:
-            rsi_durum = "⚡ Aşırı Satım"
-        elif s["rsi_onay"]:
-            rsi_durum = "🔥 Güçlü"
-        else:
-            rsi_durum = "— RSI onaysız"
-    else:
-        if rsi_val > 70:
-            rsi_durum = "🔥 Aşırı Alım"
-        elif s["rsi_onay"]:
-            rsi_durum = "🔥 Güçlü"
-        else:
-            rsi_durum = "— RSI onaysız"
-
-    # Volume Spike gösterimi
-    if s["vol_spike"]:
-        vol_durum = f"✅ VAR (×{s['vol_oran']} ort.)"
-    else:
-        vol_durum = "❌ YOK — Hacim onaysız"
-
-    # Williams %R gösterimi
-    wr_durum = "✅ Onaylandı" if s["wr_onay"] else "— W%R onaysız"
-
-    # EMA gösterimi
-    ema_durum = "✅ Uyumlu" if s["ema_onay"] else "❌ Uyumsuz"
-
-    # Fiyat formatı
     def fmt_fiyat(f):
         if f >= 100:
             return f"{f:.2f}"
@@ -805,63 +712,55 @@ def sinyal_mesaji_olustur(sinyal: dict) -> str:
         else:
             return f"{f:.8f}"
 
-    # Destek seviyeleri
-    destekler_str = ""
+    # Destek/Direnç seviye satırları
+    destek_satirlari = ""
     for idx, sev in enumerate(s["destekler"][:3], 1):
-        destekler_str += f"  S{idx}: {fmt_fiyat(sev['seviye'])}  → Güç: Zone {sev['zone_no']} {sev['zone_yildiz']}\n"
-    if not destekler_str:
-        destekler_str = "  —\n"
+        destek_satirlari += f"  S{idx}: `{fmt_fiyat(sev['seviye'])}` {sev['zone_yildiz']}\n"
+    if not destek_satirlari:
+        destek_satirlari = "  —\n"
 
-    # Direnç seviyeleri
-    direncleri_str = ""
+    direnc_satirlari = ""
     for idx, sev in enumerate(s["direncleri"][:3], 1):
-        direncleri_str += f"  R{idx}: {fmt_fiyat(sev['seviye'])}  → Güç: Zone {sev['zone_no']} {sev['zone_yildiz']}\n"
-    if not direncleri_str:
-        direncleri_str = "  —\n"
+        direnc_satirlari += f"  R{idx}: `{fmt_fiyat(sev['seviye'])}` {sev['zone_yildiz']}\n"
+    if not direnc_satirlari:
+        direnc_satirlari = "  —\n"
 
-    # Zone 3 uyarısı
-    zone3_uyari = ""
-    if s["zone_no"] == 3:
-        zone3_uyari = "⚠️ Zone 3 — Zayıf seviye\n"
+    # RSI durumu
+    rsi = s["rsi"]
+    if s["tur"] == "DESTEK":
+        rsi_tag = "⚡ Aşırı Satım" if rsi < 30 else ("🔥 Onaylı" if s["rsi_onay"] else "—")
+    else:
+        rsi_tag = "🔥 Aşırı Alım" if rsi > 70 else ("🔥 Onaylı" if s["rsi_onay"] else "—")
+
+    vol_tag = f"⚡ ×{s['vol_oran']}" if s["vol_spike"] else "—"
+    ema_tag = "✅" if s["ema_onay"] else "—"
+    zone3_uyari = "⚠️ Zayıf seviye\n" if s["zone_no"] == 3 else ""
 
     mesaj = (
-        f"📊 COIN: {s['sembol']}\n"
-        f"⏱ Timeframe: {s['timeframe'].upper()}\n"
-        f"💲 Fiyat: {fmt_fiyat(s['fiyat'])} USDT\n"
-        f"🕐 {tarih_str} · {saat_str} UTC\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"{emoji} {tur_str} {s['yakinlik']} (%{s['mesafe_pct']}) · Zone {s['zone_no']} {s['zone_yildiz']}\n"
-        f"\n"
-        f"🟢 DESTEK SEVİYELERİ (Yakından Uzağa)\n"
-        f"{destekler_str}"
-        f"\n"
-        f"🔴 DİRENÇ SEVİYELERİ (Yakından Uzağa)\n"
-        f"{direncleri_str}"
-        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📉 RSI (14): {rsi_val}  {rsi_durum}\n"
-        f"📈 Volume Spike: {vol_durum}\n"
-        f"📊 Williams %R: {s['wr']}  {wr_durum}\n"
-        f"📈 EMA Trend: {ema_durum}\n"
-        f"⭐ Güven Skoru: {s['guven']}/5  {_yildiz_goster(s['guven'])}\n"
+        f"{emoji} *{s['sembol']}* · {s['timeframe'].upper()} · {saat_str} UTC\n"
+        f"💲 Fiyat: `{fmt_fiyat(s['fiyat'])}`  →  {s['tur']} {s['yakinlik']} `%{s['mesafe_pct']}`\n"
+        f"📍 Seviye: `{fmt_fiyat(s['seviye'])}` · Zone {s['zone_no']} {s['zone_yildiz']} · {s['guc']}× dokunuş\n"
+        f"─────────────────────\n"
+        f"🟢 Destek:\n{destek_satirlari}"
+        f"🔴 Direnç:\n{direnc_satirlari}"
+        f"─────────────────────\n"
+        f"📉 RSI: {rsi}  {rsi_tag}  |  Hacim: {vol_tag}  |  EMA: {ema_tag}\n"
+        f"⭐ Güven: {s['guven']}/5  {_yildiz_goster(s['guven'])}\n"
         f"{zone3_uyari}"
-        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"_Binance SRL Bot · v3.0_"
+        f"_Binance SRL Bot_"
     )
     return mesaj
 
 
 def best20_mesaji_olustur(sinyaller: list[dict], tur: str, timeframe: str) -> str:
-    """Best 20 Destek veya Direnç listesi mesajı oluşturur."""
+    """Gate.io stili sıkıştırılmış Best 20 listesi — her coin tek satır."""
     simdi = datetime.now(timezone.utc)
-    tarih_str = simdi.strftime("%d.%m.%Y")
-    saat_str = simdi.strftime("%H:%M")
+    saat_str = simdi.strftime("%d.%m %H:%M")
 
     if tur == "DESTEK":
-        baslik = f"🟢 BEST 20 DESTEK — {timeframe.upper()} — En Yakın Destek Seviyeleri"
-        emoji = "🟢"
+        baslik = f"🟢 TOP {min(len(sinyaller), BEST_N)} DESTEK · {timeframe.upper()} · {saat_str} UTC"
     else:
-        baslik = f"🔴 BEST 20 DİRENÇ — {timeframe.upper()} — En Yakın Direnç Seviyeleri"
-        emoji = "🔴"
+        baslik = f"🔴 TOP {min(len(sinyaller), BEST_N)} DİRENÇ · {timeframe.upper()} · {saat_str} UTC"
 
     def fmt_fiyat(f):
         if f >= 100:
@@ -873,39 +772,19 @@ def best20_mesaji_olustur(sinyaller: list[dict], tur: str, timeframe: str) -> st
         else:
             return f"{f:.8f}"
 
-    def sira_emojisi(n):
-        emojiler = {1: "🥇", 2: "🥈", 3: "🥉"}
-        return emojiler.get(n, f"#{n} ")
-
-    satirlar = [
-        f"{baslik}",
-        f"🕐 {tarih_str} · {saat_str} UTC",
-        "────────────────────────────",
-        "",
-    ]
+    satirlar = [baslik, "─" * 28]
 
     for i, s in enumerate(sinyaller[:BEST_N], 1):
-        rsi_onay_str = "✅" if s["rsi_onay"] else "❌"
-        vol_str = f"✅ ×{s['vol_oran']}" if s["vol_spike"] else "❌"
-        wr_str = "✅" if s["wr_onay"] else "❌"
-        ema_str = "✅" if s["ema_onay"] else "❌"
+        rsi_tag = "⚡" if (s["tur"] == "DESTEK" and s["rsi"] < 30) or (s["tur"] == "DİRENÇ" and s["rsi"] > 70) else ""
+        vol_tag = f"⚡×{s['vol_oran']}" if s["vol_spike"] else ""
+        etiket = " ".join(t for t in [rsi_tag, vol_tag] if t)
 
         satirlar.append(
-            f"{sira_emojisi(i)} #{i}  {s['sembol']} · {s['timeframe'].upper()}\n"
-            f"   {emoji} {s['tur']} {s['yakinlik']} · Zone {s['zone_no']} {s['zone_yildiz']} · %{s['mesafe_pct']}\n"
-            f"   Seviye: {fmt_fiyat(s['seviye'])}  RSI: {s['rsi']}  {rsi_onay_str}\n"
-            f"   Vol Spike: {vol_str} · W%R: {s['wr']} {wr_str} · EMA: {ema_str}\n"
-            f"   ⭐ Güven: {s['guven']}/5  {_yildiz_goster(s['guven'])}"
+            f"{i:>2}. *{s['sembol']}* `{fmt_fiyat(s['seviye'])}` "
+            f"%{s['mesafe_pct']} {s['zone_yildiz']} {_yildiz_goster(s['guven'])} {etiket}"
         )
 
-    toplam_sinyal = len(sinyaller)
-    satirlar.extend([
-        "",
-        "────────────────────────────",
-        f"Toplam taranan: — coin · {tur.capitalize()} sinyali: {toplam_sinyal}",
-        "_Binance SRL Bot · v3.0_"
-    ])
-
+    satirlar.extend(["─" * 28, f"_Binance SRL Bot_"])
     return "\n".join(satirlar)
 
 
