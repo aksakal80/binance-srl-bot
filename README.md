@@ -44,27 +44,48 @@ pip install -r requirements.txt
 
 ---
 
+## ⚙️ Kimlik Bilgilerini Ayarlama (.env Dosyası — Önerilen Yöntem)
+
+> **⚠️ GÜVENLİK:** API anahtarlarınızı ve Telegram token'ınızı doğrudan `bot.py`'e **yazmayın**. Bu dosya GitHub'a gider ve herkes görebilir. Bunun yerine `.env` dosyası kullanın.
+
+### 1. .env Dosyası Oluşturun
+
+Repo klasöründe `.env` adında yeni bir dosya oluşturun (`.env.example` şablonunu kopyalayabilirsiniz):
+
+```bash
+cp .env.example .env
+```
+
+Ardından `.env` dosyasını bir metin editörüyle açıp gerçek değerlerinizi yazın:
+
+```
+TELEGRAM_TOKEN=8576023339:AAFoHQ5YfN...
+TELEGRAM_CHAT_ID=-1003880760948
+BINANCE_API_KEY=nCNQe7GcuSq...
+BINANCE_API_SECRET=rwBWrQybI6Tl...
+```
+
+### 2. Botu Başlatın
+
+`.env` dosyası hazırlandıktan sonra botu şu komutla çalıştırın (ayrıca `--token` vs. vermenize gerek kalmaz):
+
+```bash
+# 5 timeframe — her biri kendi forum alt konusuna
+python bot.py --multi \
+    --tf 1H:-1003880760948:2 \
+    --tf 4H:-1003880760948:4 \
+    --tf 8H:-1003880760948:7 \
+    --tf 12H:-1003880760948:13 \
+    --tf 1D:-1003880760948:9
+```
+
+> **`.env` dosyası GitHub'a gönderilmez** — `.gitignore` tarafından hariç tutulur. Sadece kendi bilgisayarınızda kalır.
+
+---
+
 ## Binance API Anahtarı
 
 Binance API anahtarı **opsiyoneldir** — bot public endpoint'leri (fiyat ve mum verisi) kullandığından key olmadan da çalışır. Ancak key ile Binance rate limit önemli ölçüde artar (1200 → 6000 ağırlık/dakika), bu da çok sayıda coin tararken daha güvenli çalışma sağlar.
-
-### API Anahtarını Ayarlama
-
-**Yöntem 1 — bot.py içinde (kalıcı):**
-
-`bot.py` dosyasının başındaki `BÖLÜM 0` kısmını düzenleyin:
-
-```python
-# ─── Binance API ───
-BINANCE_API_KEY    = "buraya_api_anahtarinizi_yazin"
-BINANCE_API_SECRET = "buraya_gizli_anahtarinizi_yazin"
-```
-
-**Yöntem 2 — Komut satırı argümanı:**
-
-```bash
-python bot.py --token BOT_TOKEN --chat-id CHAT_ID --api-key API_KEY --api-secret API_SECRET
-```
 
 > **Not:** Binance API anahtarı oluştururken sadece **Okuma** iznini verin. Emir verme (spot/futures trade) izni gerekmez.
 

@@ -24,14 +24,24 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 
+# .env dosyasından kimlik bilgilerini yükle (varsa)
+# .env dosyası GitHub'a gönderilmez — sadece lokal bilgisayarınızda kalır
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv kurulu değilse, sadece ortam değişkenlerini kullan
+
 # ═══════════════════════════════════════════════
 # BÖLÜM 0 — YAPILANDIRMA SABİTLERİ
 # ═══════════════════════════════════════════════
 
 # ─── Telegram ───
-TELEGRAM_TOKEN    = ""          # Bot token (--token ile override edilir)
-TELEGRAM_CHAT_ID  = ""          # Grup Chat ID — örnek: -1001234567890
-TELEGRAM_THREAD_ID = ""         # Forum konu (topic) ID — opsiyonel, alt konu varsa doldur
+# Değerleri .env dosyasından veya ortam değişkenlerinden okur.
+# Hiçbiri yoksa boş string kullanılır (--token / --chat-id ile override edilir).
+TELEGRAM_TOKEN     = os.environ.get("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
+TELEGRAM_THREAD_ID = os.environ.get("TELEGRAM_THREAD_ID", "")  # Forum alt konu ID (opsiyonel)
 
 # ─── Timeframe ───
 ACTIVE_TIMEFRAME  = "1h"        # --timeframe ile override edilir
@@ -69,8 +79,8 @@ CHART_DOWN_COLOR  = "#ff4560"
 CHART_TEMP_DIR    = "tmp_charts"
 
 # ─── Binance API ───
-BINANCE_API_KEY    = ""          # Binance API anahtarınız
-BINANCE_API_SECRET = ""          # Binance gizli anahtarınız
+BINANCE_API_KEY    = os.environ.get("BINANCE_API_KEY", "")    # Binance API anahtarınız
+BINANCE_API_SECRET = os.environ.get("BINANCE_API_SECRET", "") # Binance gizli anahtarınız
 
 # ─── API ───
 BINANCE_BASE_URL  = "https://api.binance.com"
