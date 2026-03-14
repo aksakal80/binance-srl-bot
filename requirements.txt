@@ -1,0 +1,8 @@
+requests
+pandas
+numpy
+scipy
+mplfinance
+matplotlib
+python-dotenv
+dtw-python
